@@ -1,0 +1,54 @@
+{
+  "project_info": {
+    "project_number": "140525205614",
+    "project_id": "pingme-58b20",
+    "storage_bucket": "pingme-58b20.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:140525205614:android:ad565e29a729a5ee03ce7f",
+        "android_client_info": {
+          "package_name": "com.orbital.pingme"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "140525205614-vr4pqbfhp7sqp858r1k3k09vgs7cplk0.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.orbital.pingme",
+            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
+          }
+        },
+        {
+          "client_id": "140525205614-ljm5dh0tkaapa3aous69ghr7s5kvks17.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBjLjwe9T4iTMDSQ-OJyEV73RkYDZ7BAAc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "140525205614-ljm5dh0tkaapa3aous69ghr7s5kvks17.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "140525205614-anibcmf0l2uko7kcdglmekuti2mlljq7.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.orbital.pingme"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

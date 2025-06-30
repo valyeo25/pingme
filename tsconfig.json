@@ -1,0 +1,25 @@
+{
+  "extends": "expo/tsconfig.base",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "strict": true,
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
+  },
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    "app/+not-found.tsx",
+    "app/_layout.tsx",
+    "app/(tabs)/reminders.tsx",
+    "app/(tabs)/map.tsx",
+    "app/(tabs)/_layout.tsx",
+    "app/(tabs)/explore.tsx",
+    "app/(tabs)/index.tsx",
+    ".expo/types/**/*.ts",
+    "expo-env.d.ts"
+  ]
+}
