@@ -41,7 +41,10 @@ app-example
 .env
 .DS_Store
 .vscode/
+.idea/
 
 PingMe/PingMe.xcodeproj/xcuserdata/
+location-reminder-app.lnk
+tracked_files.txt
 
 *.log
