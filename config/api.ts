@@ -1,5 +1,8 @@
-const BASE = "http://10.0.2.2:5002/api/reminders";
-const WEATHER_BASE = "http://10.0.2.2:5002/api/weather"
+// api.ts
+
+// Change port from 5002 to 5000 to match your server
+const BASE = "http://10.0.2.2:5000/api/reminders";
+const WEATHER_BASE = "http://10.0.2.2:5000/api/weather"
 
 export const API_ENDPOINTS = {
   REMINDERS: BASE,
@@ -9,3 +12,8 @@ export const API_ENDPOINTS = {
   CHECK_EVENT_WEATHER: `${WEATHER_BASE}/check-event`,
   WEATHER_PROCESS_BATCH: `${WEATHER_BASE}/reminders-batch`
 } as const;
+
+// Debug logging
+console.log('🔗 API Configuration:');
+console.log('   Reminders endpoint:', API_ENDPOINTS.REMINDERS);
+console.log('   Weather endpoint:', WEATHER_BASE);
