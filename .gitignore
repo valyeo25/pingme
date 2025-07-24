@@ -39,3 +39,9 @@ yarn-error.*
 app-example
 
 .env
+.DS_Store
+.vscode/
+
+PingMe/PingMe.xcodeproj/xcuserdata/
+
+*.log
