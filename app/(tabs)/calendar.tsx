@@ -1,13 +1,13 @@
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
-import * as ExpoCalendar from 'expo-calendar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useEffect, useState } from 'react';
 import {
-    ActivityIndicator,
     Alert,
     ImageBackground,
+    Modal,
     ScrollView,
     StyleSheet,
     Text,
+    TextInput,
     TouchableOpacity,
     View,
 } from 'react-native';
@@ -17,290 +17,285 @@ import { Calendar } from 'react-native-calendars';
 interface CalendarEvent {
     id: string;
     title: string;
-    startDate: string;
-    endDate: string;
-    allDay?: boolean;
-    location?: string;
-    notes?: string;
+    date: string;
+    time: string;
+    description?: string;
+    color: string;
 }
 
 interface MarkedDates {
     [date: string]: {
         marked: boolean;
         dotColor: string;
-        activeOpacity?: number;
+        selected?: boolean;
+        selectedColor?: string;
     };
 }
+
+const EVENT_COLORS = [
+    '#FF6B6B', // Red
+    '#4ECDC4', // Teal
+    '#45B7D1', // Blue
+    '#96CEB4', // Green
+    '#FFEAA7', // Yellow
+    '#DDA0DD', // Plum
+    '#98D8C8', // Mint
+    '#F7DC6F', // Light Yellow
+];
 
 export default function CalendarScreen() {
     const [selectedDate, setSelectedDate] = useState('');
     const [events, setEvents] = useState<CalendarEvent[]>([]);
     const [markedDates, setMarkedDates] = useState<MarkedDates>({});
-    const [isLoading, setIsLoading] = useState(false);
-    const [isGoogleSignedIn, setIsGoogleSignedIn] = useState(false);
-    const [calendars, setCalendars] = useState<ExpoCalendar.Calendar[]>([]);
+    const [isAddModalVisible, setIsAddModalVisible] = useState(false);
+    const [isEditModalVisible, setIsEditModalVisible] = useState(false);
+    const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
+    
+    // Form states
+    const [eventTitle, setEventTitle] = useState('');
+    const [eventTime, setEventTime] = useState('');
+    const [eventDescription, setEventDescription] = useState('');
+    const [selectedColor, setSelectedColor] = useState(EVENT_COLORS[0]);
 
     useEffect(() => {
-        initializeCalendar();
-        checkGoogleSignInStatus();
+        loadEvents();
     }, []);
 
-    const initializeCalendar = async () => {
+    useEffect(() => {
+        updateMarkedDates();
+    }, [events]);
+
+    const loadEvents = async () => {
         try {
-            // Request calendar permissions
-            const { status } = await ExpoCalendar.requestCalendarPermissionsAsync();
-            if (status === 'granted') {
-                loadDeviceCalendars();
-            } else {
-                Alert.alert('Permission Needed', 'Calendar permission is required to show your events.');
+            const storedEvents = await AsyncStorage.getItem('calendar_events');
+            if (storedEvents) {
+                const parsedEvents = JSON.parse(storedEvents);
+                setEvents(parsedEvents);
             }
-        } catch (error) {
-            console.error('Calendar initialization error:', error);
-        }
-    };
-
-    const checkGoogleSignInStatus = async () => {
-        try {
-            const userInfo = await GoogleSignin.getCurrentUser();
-            setIsGoogleSignedIn(!!userInfo);
-        } catch (error) {
-            console.error('Google Sign-In status check failed:', error);
-            setIsGoogleSignedIn(false);
-        }
-    };
-
-    const loadDeviceCalendars = async () => {
-        setIsLoading(true);
-        try {
-            const deviceCalendars = await ExpoCalendar.getCalendarsAsync(ExpoCalendar.EntityTypes.EVENT);
-            setCalendars(deviceCalendars);
-
-            // Load events from all calendars
-            await loadEventsFromCalendars(deviceCalendars);
-        } catch (error) {
-            console.error('Error loading calendars:', error);
-            Alert.alert('Error', 'Failed to load calendars');
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    const loadEventsFromCalendars = async (calendars: ExpoCalendar.Calendar[]) => {
-        try {
-            const now = new Date();
-            const startDate = new Date(now.getFullYear(), now.getMonth(), 1); // Start of current month
-            const endDate = new Date(now.getFullYear(), now.getMonth() + 2, 0); // End of next month
-
-            let allEvents: CalendarEvent[] = [];
-            const marked: MarkedDates = {};
-
-            for (const calendar of calendars) {
-                const calendarEvents = await ExpoCalendar.getEventsAsync(
-                    [calendar.id],
-                    startDate,
-                    endDate
-                );
-
-                const formattedEvents: CalendarEvent[] = calendarEvents.map(event => ({
-                    id: event.id,
-                    title: event.title,
-                    // Convert Date objects to ISO strings
-                    startDate: event.startDate instanceof Date
-                        ? event.startDate.toISOString()
-                        : event.startDate,
-                    endDate: event.endDate instanceof Date
-                        ? event.endDate.toISOString()
-                        : event.endDate,
-                    allDay: event.allDay,
-                    location: event.location || undefined, // Convert null to undefined
-                    notes: event.notes,
-                }));
-
-                allEvents = [...allEvents, ...formattedEvents];
-
-                // Mark dates with events
-                formattedEvents.forEach(event => {
-                    const dateKey = new Date(event.startDate).toISOString().split('T')[0];
-                    marked[dateKey] = {
-                        marked: true,
-                        dotColor: calendar.color || '#007AFF',
-                    };
-                });
-            }
-
-            setEvents(allEvents);
-            setMarkedDates(marked);
         } catch (error) {
             console.error('Error loading events:', error);
         }
     };
 
-
-    const signInWithGoogle = async () => {
-    try {
-        console.log('Starting Google Sign-In...');
-        setupGoogleSignIn();
-        
-        // Check Play Services first
-        await GoogleSignin.hasPlayServices();
-        
-        console.log('Attempting Google sign-in...');
-        const signInResult = await GoogleSignin.signIn();
-        
-        // Get user info separately
-        const userInfo = await GoogleSignin.getCurrentUser();
-        
-        if (userInfo && userInfo.user) {
-            console.log('Google Sign-In successful!');
-            console.log('User:', userInfo.user.name, userInfo.user.email);
-            
-            setIsGoogleSignedIn(true);
-            Alert.alert(
-                'Success!', 
-                `Connected to Google Calendar as ${userInfo.user.name}`
-            );
-        } else {
-            throw new Error('Failed to get user information');
-        }
-        
-    } catch (error: any) {
-        console.error('Google Sign-In error:', error);
-        
-        if (error.code === 'SIGN_IN_CANCELLED') {
-            Alert.alert('Cancelled', 'Google sign-in was cancelled');
-        } else if (error.code === 'DEVELOPER_ERROR') {
-            Alert.alert(
-                'Setup Error', 
-                'Google Sign-In configuration issue. Please check the setup.'
-            );
-        } else {
-            Alert.alert('Error', `Failed to connect: ${error.message}`);
-        }
-    }
-};
-    // Make sure your Google setup includes calendar scope
-    const setupGoogleSignIn = () => {
-        GoogleSignin.configure({
-            webClientId: '572824445032-o1aj7dn44e9pneh9henbiciufed6sl0n.apps.googleusercontent.com',
-            scopes: [
-                'profile',
-                'email',
-                'https://www.googleapis.com/auth/calendar.readonly'
-            ],
-            offlineAccess: true,
-        });
-    };
-
-    const signOutGoogle = async () => {
+    const saveEvents = async (newEvents: CalendarEvent[]) => {
         try {
-            await GoogleSignin.signOut();
-            setIsGoogleSignedIn(false);
-            Alert.alert('Success', 'Google account disconnected');
+            await AsyncStorage.setItem('calendar_events', JSON.stringify(newEvents));
+            setEvents(newEvents);
         } catch (error) {
-            console.error('Google Sign-Out error:', error);
+            console.error('Error saving events:', error);
+            Alert.alert('Error', 'Failed to save event');
         }
     };
 
-    // ADD THIS NEW FUNCTION - This is the Google Calendar sync functionality
-    const fetchGoogleCalendarEvents = async () => {
-        try {
-            // Get current user and tokens
-            const userInfo = await GoogleSignin.getCurrentUser();
-            if (!userInfo) {
-                Alert.alert('Error', 'Not signed in to Google');
-                return;
-            }
+    const updateMarkedDates = () => {
+        const marked: MarkedDates = {};
+        events.forEach(event => {
+            marked[event.date] = {
+                marked: true,
+                dotColor: event.color,
+            };
+        });
+        setMarkedDates(marked);
+    };
 
-            const tokens = await GoogleSignin.getTokens();
-            setIsLoading(true);
+    const generateId = () => {
+        return Date.now().toString() + Math.random().toString(36).substr(2, 9);
+    };
 
-            const now = new Date();
-            const startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            const endDate = new Date(now.getFullYear(), now.getMonth() + 2, 0);
+    const resetForm = () => {
+        setEventTitle('');
+        setEventTime('');
+        setEventDescription('');
+        setSelectedColor(EVENT_COLORS[0]);
+    };
 
-            const response = await fetch(
-                `https://www.googleapis.com/calendar/v3/calendars/primary/events?` +
-                `timeMin=${startDate.toISOString()}&` +
-                `timeMax=${endDate.toISOString()}&` +
-                `singleEvents=true&` +
-                `orderBy=startTime`,
-                {
-                    headers: {
-                        Authorization: `Bearer ${tokens.accessToken}`,
-                        'Content-Type': 'application/json',
-                    },
-                }
-            );
-
-            if (response.ok) {
-                const data = await response.json();
-                const googleEvents: CalendarEvent[] = data.items.map((item: any) => ({
-                    id: `google_${item.id}`, // Prefix to distinguish from device events
-                    title: item.summary || 'Untitled Event',
-                    startDate: item.start.dateTime || item.start.date,
-                    endDate: item.end.dateTime || item.end.date,
-                    allDay: !item.start.dateTime,
-                    location: item.location,
-                    notes: item.description,
-                }));
-
-                // Remove old Google events and add new ones
-                setEvents(prevEvents => {
-                    const deviceEvents = prevEvents.filter(event => !event.id.startsWith('google_'));
-                    return [...deviceEvents, ...googleEvents];
-                });
-
-                // Update marked dates with Google events
-                const newMarked: MarkedDates = {};
-                googleEvents.forEach(event => {
-                    const dateKey = new Date(event.startDate).toISOString().split('T')[0];
-                    newMarked[dateKey] = {
-                        marked: true,
-                        dotColor: '#4285F4', // Google blue
-                    };
-                });
-
-                setMarkedDates(prevMarked => {
-                    // Keep device calendar markers, add Google markers
-                    const deviceMarked = Object.fromEntries(
-                        Object.entries(prevMarked).filter(([_, value]) => value.dotColor !== '#4285F4')
-                    );
-                    return { ...deviceMarked, ...newMarked };
-                });
-
-                Alert.alert('Success', `Imported ${googleEvents.length} events from Google Calendar`);
-            } else {
-                const errorData = await response.json();
-                throw new Error(`HTTP ${response.status}: ${errorData.error?.message || response.statusText}`);
-            }
-        } catch (error: any) {
-            console.error('Error fetching Google Calendar events:', error);
-
-            if (error.message.includes('401') || error.message.includes('403')) {
-                Alert.alert('Permission Error', 'Calendar access denied. Please reconnect your Google account.');
-            } else {
-                Alert.alert('Error', 'Failed to import Google Calendar events');
-            }
-        } finally {
-            setIsLoading(false);
+    const openAddModal = () => {
+        if (!selectedDate) {
+            Alert.alert('Select Date', 'Please select a date first');
+            return;
         }
+        resetForm();
+        setIsAddModalVisible(true);
+    };
+
+    const openEditModal = (event: CalendarEvent) => {
+        setEditingEvent(event);
+        setEventTitle(event.title);
+        setEventTime(event.time);
+        setEventDescription(event.description || '');
+        setSelectedColor(event.color);
+        setIsEditModalVisible(true);
+    };
+
+    const closeModals = () => {
+        setIsAddModalVisible(false);
+        setIsEditModalVisible(false);
+        setEditingEvent(null);
+        resetForm();
+    };
+
+    const addEvent = async () => {
+        if (!eventTitle.trim()) {
+            Alert.alert('Missing Title', 'Please enter an event title');
+            return;
+        }
+
+        const newEvent: CalendarEvent = {
+            id: generateId(),
+            title: eventTitle.trim(),
+            date: selectedDate,
+            time: eventTime.trim() || 'All Day',
+            description: eventDescription.trim(),
+            color: selectedColor,
+        };
+
+        const updatedEvents = [...events, newEvent];
+        await saveEvents(updatedEvents);
+        closeModals();
+        Alert.alert('Success', 'Event added successfully!');
+    };
+
+    const updateEvent = async () => {
+        if (!eventTitle.trim() || !editingEvent) {
+            Alert.alert('Missing Title', 'Please enter an event title');
+            return;
+        }
+
+        const updatedEvent: CalendarEvent = {
+            ...editingEvent,
+            title: eventTitle.trim(),
+            time: eventTime.trim() || 'All Day',
+            description: eventDescription.trim(),
+            color: selectedColor,
+        };
+
+        const updatedEvents = events.map(event => 
+            event.id === editingEvent.id ? updatedEvent : event
+        );
+        
+        await saveEvents(updatedEvents);
+        closeModals();
+        Alert.alert('Success', 'Event updated successfully!');
+    };
+
+    const deleteEvent = async (eventId: string) => {
+        Alert.alert(
+            'Delete Event',
+            'Are you sure you want to delete this event?',
+            [
+                { text: 'Cancel', style: 'cancel' },
+                {
+                    text: 'Delete',
+                    style: 'destructive',
+                    onPress: async () => {
+                        const updatedEvents = events.filter(event => event.id !== eventId);
+                        await saveEvents(updatedEvents);
+                        Alert.alert('Success', 'Event deleted successfully!');
+                    },
+                },
+            ]
+        );
     };
 
     const getEventsForDate = (date: string) => {
-        return events.filter(event => {
-            const eventDate = new Date(event.startDate).toISOString().split('T')[0];
-            return eventDate === date;
-        });
-    };
-
-    const formatTime = (dateString: string) => {
-        return new Date(dateString).toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-        });
+        return events.filter(event => event.date === date);
     };
 
     const selectedDateEvents = selectedDate ? getEventsForDate(selectedDate) : [];
+
+    const EventModal = ({ visible, onClose, onSave, title }: {
+        visible: boolean;
+        onClose: () => void;
+        onSave: () => void;
+        title: string;
+    }) => (
+        <Modal
+            visible={visible}
+            animationType="slide"
+            presentationStyle="pageSheet"
+            onRequestClose={onClose}
+        >
+            <View style={styles.modalContainer}>
+                <View style={styles.modalHeader}>
+                    <TouchableOpacity onPress={onClose}>
+                        <Text style={styles.modalCancelText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <Text style={styles.modalTitle}>{title}</Text>
+                    <TouchableOpacity onPress={onSave}>
+                        <Text style={styles.modalSaveText}>Save</Text>
+                    </TouchableOpacity>
+                </View>
+
+                <ScrollView style={styles.modalContent}>
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Event Title *</Text>
+                        <TextInput
+                            style={styles.textInput}
+                            value={eventTitle}
+                            onChangeText={setEventTitle}
+                            placeholder="Enter event title"
+                            placeholderTextColor="#999"
+                        />
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Time</Text>
+                        <TextInput
+                            style={styles.textInput}
+                            value={eventTime}
+                            onChangeText={setEventTime}
+                            placeholder="e.g. 2:00 PM or leave empty for all day"
+                            placeholderTextColor="#999"
+                        />
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Description</Text>
+                        <TextInput
+                            style={[styles.textInput, styles.textArea]}
+                            value={eventDescription}
+                            onChangeText={setEventDescription}
+                            placeholder="Enter event description (optional)"
+                            placeholderTextColor="#999"
+                            multiline
+                            numberOfLines={3}
+                        />
+                    </View>
+
+                    <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Color</Text>
+                        <View style={styles.colorPicker}>
+                            {EVENT_COLORS.map(color => (
+                                <TouchableOpacity
+                                    key={color}
+                                    style={[
+                                        styles.colorOption,
+                                        { backgroundColor: color },
+                                        selectedColor === color && styles.selectedColor
+                                    ]}
+                                    onPress={() => setSelectedColor(color)}
+                                />
+                            ))}
+                        </View>
+                    </View>
+
+                    {selectedDate && (
+                        <View style={styles.inputGroup}>
+                            <Text style={styles.inputLabel}>Date</Text>
+                            <Text style={styles.dateText}>
+                                {new Date(selectedDate).toLocaleDateString('en-US', {
+                                    weekday: 'long',
+                                    year: 'numeric',
+                                    month: 'long',
+                                    day: 'numeric'
+                                })}
+                            </Text>
+                        </View>
+                    )}
+                </ScrollView>
+            </View>
+        </Modal>
+    );
 
     return (
         <ImageBackground
@@ -309,35 +304,17 @@ export default function CalendarScreen() {
             imageStyle={{ opacity: 0.2 }}
             resizeMode="cover"
         >
-            <Text style={styles.header}>Calendar</Text>
+            <Text style={styles.header}>My Calendar</Text>
 
-            {/* UPDATED Google Calendar Integration Section */}
-            <View style={styles.googleSection}>
-                <Text style={styles.sectionTitle}>Google Calendar</Text>
-                {!isGoogleSignedIn ? (
-                    <TouchableOpacity style={styles.googleButton} onPress={signInWithGoogle}>
-                        <Text style={styles.googleButtonText}>Connect Google Calendar</Text>
+            {/* Calendar Stats */}
+            <View style={styles.statsSection}>
+                <Text style={styles.statsText}>
+                    📅 {events.length} events total
+                </Text>
+                {selectedDate && (
+                    <TouchableOpacity style={styles.addButton} onPress={openAddModal}>
+                        <Text style={styles.addButtonText}>+ Add Event</Text>
                     </TouchableOpacity>
-                ) : (
-                    <View style={styles.connectedSection}>
-                        <View style={styles.connectedInfo}>
-                            <Text style={styles.connectedText}>✅ Google Calendar Connected</Text>
-                        </View>
-                        <View style={styles.buttonRow}>
-                            <TouchableOpacity
-                                style={styles.syncButton}
-                                onPress={fetchGoogleCalendarEvents}
-                                disabled={isLoading}
-                            >
-                                <Text style={styles.syncButtonText}>
-                                    {isLoading ? 'Importing...' : 'Import Events'}
-                                </Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity style={styles.disconnectButton} onPress={signOutGoogle}>
-                                <Text style={styles.disconnectButtonText}>Disconnect</Text>
-                            </TouchableOpacity>
-                        </View>
-                    </View>
                 )}
             </View>
 
@@ -388,42 +365,62 @@ export default function CalendarScreen() {
                     {selectedDate
                         ? `Events for ${new Date(selectedDate).toLocaleDateString('en-US', {
                             weekday: 'long',
-                            year: 'numeric',
-                            month: 'long',
+                            month: 'short',
                             day: 'numeric'
                         })}`
                         : 'Select a date to view events'
                     }
                 </Text>
 
-                {isLoading ? (
-                    <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="large" color="#007AFF" />
-                        <Text style={styles.loadingText}>Loading events...</Text>
-                    </View>
-                ) : selectedDateEvents.length > 0 ? (
+                {selectedDateEvents.length > 0 ? (
                     selectedDateEvents.map((event) => (
-                        <View key={event.id} style={styles.eventCard}>
-                            <Text style={styles.eventTitle}>{event.title}</Text>
-                            {!event.allDay && (
-                                <Text style={styles.eventTime}>
-                                    {formatTime(event.startDate)} - {formatTime(event.endDate)}
-                                </Text>
-                            )}
-                            {event.location && (
-                                <Text style={styles.eventLocation}>📍 {event.location}</Text>
-                            )}
-                            {event.notes && (
-                                <Text style={styles.eventNotes}>{event.notes}</Text>
-                            )}
-                        </View>
+                        <TouchableOpacity
+                            key={event.id}
+                            style={[styles.eventCard, { borderLeftColor: event.color }]}
+                            onPress={() => openEditModal(event)}
+                        >
+                            <View style={styles.eventContent}>
+                                <Text style={styles.eventTitle}>{event.title}</Text>
+                                <Text style={styles.eventTime}>{event.time}</Text>
+                                {event.description && (
+                                    <Text style={styles.eventDescription}>{event.description}</Text>
+                                )}
+                            </View>
+                            <TouchableOpacity
+                                style={styles.deleteButton}
+                                onPress={() => deleteEvent(event.id)}
+                            >
+                                <Text style={styles.deleteButtonText}>×</Text>
+                            </TouchableOpacity>
+                        </TouchableOpacity>
                     ))
                 ) : selectedDate ? (
-                    <Text style={styles.noEventsText}>No events for this date</Text>
+                    <View style={styles.noEventsContainer}>
+                        <Text style={styles.noEventsText}>No events for this date</Text>
+                        <TouchableOpacity style={styles.addEventButton} onPress={openAddModal}>
+                            <Text style={styles.addEventButtonText}>+ Add Your First Event</Text>
+                        </TouchableOpacity>
+                    </View>
                 ) : (
-                    <Text style={styles.noEventsText}>Select a date to view events</Text>
+                    <Text style={styles.noEventsText}>Select a date to view or add events</Text>
                 )}
             </ScrollView>
+
+            {/* Add Event Modal */}
+            <EventModal
+                visible={isAddModalVisible}
+                onClose={closeModals}
+                onSave={addEvent}
+                title="Add New Event"
+            />
+
+            {/* Edit Event Modal */}
+            <EventModal
+                visible={isEditModalVisible}
+                onClose={closeModals}
+                onSave={updateEvent}
+                title="Edit Event"
+            />
         </ImageBackground>
     );
 }
@@ -441,71 +438,27 @@ const styles = StyleSheet.create({
         textAlign: 'center',
         color: '#333',
     },
-    googleSection: {
+    statsSection: {
         backgroundColor: 'rgba(255, 255, 255, 0.9)',
         padding: 15,
         borderRadius: 10,
         marginBottom: 20,
-    },
-    sectionTitle: {
-        fontSize: 18,
-        fontWeight: 'bold',
-        marginBottom: 10,
-        color: '#333',
-    },
-    googleButton: {
-        backgroundColor: '#4285F4',
-        paddingVertical: 12,
-        paddingHorizontal: 20,
-        borderRadius: 8,
-        alignItems: 'center',
-    },
-    googleButtonText: {
-        color: 'white',
-        fontSize: 16,
-        fontWeight: '600',
-    },
-    connectedSection: {
-        // UPDATED - Removed flexDirection: 'row' to stack vertically
-        justifyContent: 'space-between',
-        alignItems: 'stretch',
-    },
-    // NEW STYLES ADDED
-    connectedInfo: {
-        marginBottom: 10,
-    },
-    buttonRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        gap: 10,
-    },
-    syncButton: {
-        backgroundColor: '#4285F4',
-        paddingVertical: 10,
-        paddingHorizontal: 20,
-        borderRadius: 8,
-        flex: 1,
         alignItems: 'center',
     },
-    syncButtonText: {
-        color: 'white',
+    statsText: {
+        color: '#666',
         fontSize: 16,
         fontWeight: '600',
     },
-    // END NEW STYLES
-    connectedText: {
-        color: '#4CAF50',
-        fontSize: 16,
-        fontWeight: '600',
+    addButton: {
+        backgroundColor: '#4CAF50',
+        paddingVertical: 8,
+        paddingHorizontal: 15,
+        borderRadius: 6,
     },
-    disconnectButton: {
-        backgroundColor: '#FF3B30',
-        paddingVertical: 10,
-        paddingHorizontal: 20,
-        borderRadius: 8,
-        alignItems: 'center',
-    },
-    disconnectButtonText: {
+    addButtonText: {
         color: 'white',
         fontSize: 14,
         fontWeight: '600',
@@ -521,7 +474,7 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgba(255, 255, 255, 0.9)',
         borderRadius: 10,
         padding: 15,
-        maxHeight: 300,
+        maxHeight: 280,
     },
     eventsHeader: {
         fontSize: 18,
@@ -530,49 +483,145 @@ const styles = StyleSheet.create({
         color: '#333',
         textAlign: 'center',
     },
-    loadingContainer: {
-        alignItems: 'center',
-        paddingVertical: 20,
-    },
-    loadingText: {
-        marginTop: 10,
-        fontSize: 16,
-        color: '#666',
-    },
     eventCard: {
         backgroundColor: '#f8f9fa',
         padding: 15,
         borderRadius: 8,
         marginBottom: 10,
         borderLeftWidth: 4,
-        borderLeftColor: '#007AFF',
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    eventContent: {
+        flex: 1,
     },
     eventTitle: {
         fontSize: 16,
         fontWeight: 'bold',
         color: '#333',
-        marginBottom: 5,
+        marginBottom: 3,
     },
     eventTime: {
         fontSize: 14,
         color: '#666',
         marginBottom: 3,
     },
-    eventLocation: {
-        fontSize: 14,
-        color: '#666',
-        marginBottom: 3,
-    },
-    eventNotes: {
+    eventDescription: {
         fontSize: 14,
         color: '#888',
         fontStyle: 'italic',
+    },
+    deleteButton: {
+        backgroundColor: '#FF4444',
+        width: 30,
+        height: 30,
+        borderRadius: 15,
+        justifyContent: 'center',
+        alignItems: 'center',
+        marginLeft: 10,
+    },
+    deleteButtonText: {
+        color: 'white',
+        fontSize: 18,
+        fontWeight: 'bold',
+    },
+    noEventsContainer: {
+        alignItems: 'center',
+        paddingVertical: 20,
     },
     noEventsText: {
         textAlign: 'center',
         fontSize: 16,
         color: '#666',
-        paddingVertical: 20,
+        marginBottom: 15,
         fontStyle: 'italic',
+    },
+    addEventButton: {
+        backgroundColor: '#007AFF',
+        paddingVertical: 12,
+        paddingHorizontal: 20,
+        borderRadius: 8,
+    },
+    addEventButtonText: {
+        color: 'white',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    
+    // Modal Styles
+    modalContainer: {
+        flex: 1,
+        backgroundColor: '#fff',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        padding: 20,
+        borderBottomWidth: 1,
+        borderBottomColor: '#e0e0e0',
+        paddingTop: 60,
+    },
+    modalCancelText: {
+        color: '#FF4444',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: 'bold',
+        color: '#333',
+    },
+    modalSaveText: {
+        color: '#007AFF',
+        fontSize: 16,
+        fontWeight: '600',
+    },
+    modalContent: {
+        flex: 1,
+        padding: 20,
+    },
+    inputGroup: {
+        marginBottom: 20,
+    },
+    inputLabel: {
+        fontSize: 16,
+        fontWeight: '600',
+        color: '#333',
+        marginBottom: 8,
+    },
+    textInput: {
+        borderWidth: 1,
+        borderColor: '#ddd',
+        borderRadius: 8,
+        padding: 12,
+        fontSize: 16,
+        backgroundColor: '#f9f9f9',
+    },
+    textArea: {
+        height: 80,
+        textAlignVertical: 'top',
+    },
+    colorPicker: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 10,
+    },
+    colorOption: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        borderWidth: 3,
+        borderColor: 'transparent',
+    },
+    selectedColor: {
+        borderColor: '#333',
+    },
+    dateText: {
+        fontSize: 16,
+        color: '#666',
+        backgroundColor: '#f0f0f0',
+        padding: 12,
+        borderRadius: 8,
     },
 });
