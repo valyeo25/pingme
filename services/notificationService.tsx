@@ -61,7 +61,7 @@ function calculateDistance(
 async function checkNearbyReminders(currentLocation: Location.LocationObject): Promise<void> {
     try {
         // Replace with your actual API endpoint
-        const response = await fetch('http://172.29.224.1:5000/api/reminders');
+        const response = await fetch('http://192.168.219.161:5002/api/reminders');
         if (!response.ok) {
             console.log('Failed to fetch reminders:', response.status);
             return;

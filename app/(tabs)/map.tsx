@@ -1,4 +1,4 @@
-// map.tsx - Fixed version with proper error handling types
+// map.tsx - Updated with Singapore areas for weather support
 
 import * as Location from "expo-location";
 import React, { useEffect, useRef, useState } from "react";
@@ -16,24 +16,93 @@ import {
 } from "react-native";
 import MapView, { MapPressEvent, Marker, Region } from "react-native-maps";
 
+// Singapore areas from your weather API
+const SINGAPORE_AREAS = [
+  { name: 'Ang Mo Kio', coordinates: { latitude: 1.375, longitude: 103.839 } },
+  { name: 'Bedok', coordinates: { latitude: 1.321, longitude: 103.924 } },
+  { name: 'Bishan', coordinates: { latitude: 1.350772, longitude: 103.839 } },
+  { name: 'Boon Lay', coordinates: { latitude: 1.304, longitude: 103.701 } },
+  { name: 'Bukit Batok', coordinates: { latitude: 1.353, longitude: 103.754 } },
+  { name: 'Bukit Merah', coordinates: { latitude: 1.277, longitude: 103.819 } },
+  { name: 'Bukit Panjang', coordinates: { latitude: 1.362, longitude: 103.77195 } },
+  { name: 'Bukit Timah', coordinates: { latitude: 1.325, longitude: 103.791 } },
+  { name: 'Central Water Catchment', coordinates: { latitude: 1.38, longitude: 103.805 } },
+  { name: 'Changi', coordinates: { latitude: 1.357, longitude: 103.987 } },
+  { name: 'Choa Chu Kang', coordinates: { latitude: 1.377, longitude: 103.745 } },
+  { name: 'City', coordinates: { latitude: 1.292, longitude: 103.844 } },
+  { name: 'Clementi', coordinates: { latitude: 1.315, longitude: 103.76 } },
+  { name: 'Geylang', coordinates: { latitude: 1.318, longitude: 103.884 } },
+  { name: 'Hougang', coordinates: { latitude: 1.361218, longitude: 103.886 } },
+  { name: 'Jalan Bahar', coordinates: { latitude: 1.347, longitude: 103.67 } },
+  { name: 'Jurong East', coordinates: { latitude: 1.326, longitude: 103.737 } },
+  { name: 'Jurong Island', coordinates: { latitude: 1.266, longitude: 103.699 } },
+  { name: 'Jurong West', coordinates: { latitude: 1.34039, longitude: 103.705 } },
+  { name: 'Kallang', coordinates: { latitude: 1.312, longitude: 103.862 } },
+  { name: 'Lim Chu Kang', coordinates: { latitude: 1.423, longitude: 103.717332 } },
+  { name: 'Mandai', coordinates: { latitude: 1.419, longitude: 103.812 } },
+  { name: 'Marine Parade', coordinates: { latitude: 1.297, longitude: 103.891 } },
+  { name: 'Novena', coordinates: { latitude: 1.327, longitude: 103.826 } },
+  { name: 'Pasir Ris', coordinates: { latitude: 1.37, longitude: 103.948 } },
+  { name: 'Paya Lebar', coordinates: { latitude: 1.358, longitude: 103.914 } },
+  { name: 'Pioneer', coordinates: { latitude: 1.315, longitude: 103.675 } },
+  { name: 'Pulau Tekong', coordinates: { latitude: 1.403, longitude: 104.053 } },
+  { name: 'Pulau Ubin', coordinates: { latitude: 1.404, longitude: 103.96 } },
+  { name: 'Punggol', coordinates: { latitude: 1.401, longitude: 103.904 } },
+  { name: 'Queenstown', coordinates: { latitude: 1.291, longitude: 103.78576 } },
+  { name: 'Seletar', coordinates: { latitude: 1.404, longitude: 103.869 } },
+  { name: 'Sembawang', coordinates: { latitude: 1.445, longitude: 103.818495 } },
+  { name: 'Sengkang', coordinates: { latitude: 1.384, longitude: 103.891443 } },
+  { name: 'Sentosa', coordinates: { latitude: 1.243, longitude: 103.832 } },
+  { name: 'Serangoon', coordinates: { latitude: 1.357, longitude: 103.865 } },
+  { name: 'Southern Islands', coordinates: { latitude: 1.208, longitude: 103.842 } },
+  { name: 'Sungei Kadut', coordinates: { latitude: 1.413, longitude: 103.756 } },
+  { name: 'Tampines', coordinates: { latitude: 1.345, longitude: 103.944 } },
+  { name: 'Tanglin', coordinates: { latitude: 1.308, longitude: 103.813 } },
+  { name: 'Tengah', coordinates: { latitude: 1.374, longitude: 103.715 } },
+  { name: 'Toa Payoh', coordinates: { latitude: 1.334304, longitude: 103.856327 } },
+  { name: 'Tuas', coordinates: { latitude: 1.294947, longitude: 103.635 } },
+  { name: 'Western Islands', coordinates: { latitude: 1.205926, longitude: 103.746 } },
+  { name: 'Western Water Catchment', coordinates: { latitude: 1.405, longitude: 103.689 } },
+  { name: 'Woodlands', coordinates: { latitude: 1.432, longitude: 103.786528 } },
+  { name: 'Yishun', coordinates: { latitude: 1.418, longitude: 103.839 } },
+];
+
 // --- Type Definitions ---
 type Reminder = {
   id: string;
   title: string;
   category: string;
   isActive: boolean;
+  isOutdoor?: boolean;
   location?: {
+    name: string;
     latitude: number;
     longitude: number;
     proximity?: number;
   };
+  weather?: {
+    area: string;
+    forecast: string;
+    timestamp: string;
+    cached_at: string;
+    warning: boolean;
+    recommendation: string;
+    icon: string;
+  };
+  weatherAlert?: string | null;
 };
 
+// Updated interface to match RemindersScreen expectations
 type MapScreenProps = {
-  reminders: Reminder[];
+  reminders: Reminder[]; // This now matches ReminderWithWeather[]
   onAssignLocation: (
     reminderId: string,
-    location: { latitude: number; longitude: number; proximity: number }
+    location: { 
+      name: string; 
+      latitude: number; 
+      longitude: number; 
+      proximity: number 
+    }
   ) => Promise<void>;
   reminderToAssign: string | null;
 };
@@ -48,11 +117,16 @@ type SearchResult = {
 export default function MapScreen({
   reminders,
   onAssignLocation,
+  reminderToAssign,
 }: MapScreenProps): React.ReactElement {
   const [region, setRegion] = useState<Region | null>(null);
-  const [selectedLocation, setSelectedLocation] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [selectedLocation, setSelectedLocation] = useState<{ 
+    latitude: number; 
+    longitude: number; 
+    areaName?: string;
+  } | null>(null);
   const [isModalVisible, setModalVisible] = useState(false);
-  const [selectedProximity, setSelectedProximity] = useState<number>(10);
+  const [selectedProximity, setSelectedProximity] = useState<number>(100);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   // Search state
@@ -60,10 +134,55 @@ export default function MapScreen({
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
-  const [searchMarker, setSearchMarker] = useState<{ latitude: number; longitude: number; title: string } | null>(null);
+  const [searchMarker, setSearchMarker] = useState<{ 
+    latitude: number; 
+    longitude: number; 
+    title: string;
+    areaName?: string;
+  } | null>(null);
+
+  // Singapore area search
+  const [filteredAreas, setFilteredAreas] = useState(SINGAPORE_AREAS);
+  const [showAreaResults, setShowAreaResults] = useState(false);
 
   const mapRef = useRef<MapView>(null);
   const searchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Calculate distance between two coordinates
+  const calculateDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371; // Earth's radius in km
+    const dLat = toRadians(lat2 - lat1);
+    const dLon = toRadians(lon2 - lon1);
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(toRadians(lat1)) * Math.cos(toRadians(lat2)) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+
+  const toRadians = (degrees: number) => degrees * (Math.PI/180);
+
+  // Find nearest Singapore area for any coordinate
+  const findNearestArea = (latitude: number, longitude: number) => {
+    let nearestArea = SINGAPORE_AREAS[0];
+    let minDistance = Infinity;
+
+    SINGAPORE_AREAS.forEach(area => {
+      const distance = calculateDistance(
+        latitude, 
+        longitude, 
+        area.coordinates.latitude, 
+        area.coordinates.longitude
+      );
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearestArea = area;
+      }
+    });
+
+    return { area: nearestArea, distance: minDistance };
+  };
 
   // Get user location on mount
   useEffect(() => {
@@ -72,12 +191,12 @@ export default function MapScreen({
         const { status } = await Location.requestForegroundPermissionsAsync();
         if (status !== "granted") {
           setErrorMsg("Permission to access location was denied");
-          // Set default location (Singapore) if permission denied
+          // Set default location (Singapore)
           setRegion({
             latitude: 1.3521,
             longitude: 103.8198,
-            latitudeDelta: 0.01,
-            longitudeDelta: 0.01,
+            latitudeDelta: 0.3,
+            longitudeDelta: 0.3,
           });
           return;
         }
@@ -86,7 +205,6 @@ export default function MapScreen({
           accuracy: Location.Accuracy.Balanced,
         });
         
-        // Validate coordinates before setting
         if (loc?.coords?.latitude && loc?.coords?.longitude) {
           setRegion({
             latitude: loc.coords.latitude,
@@ -104,59 +222,60 @@ export default function MapScreen({
         setRegion({
           latitude: 1.3521,
           longitude: 103.8198,
-          latitudeDelta: 0.01,
-          longitudeDelta: 0.01,
+          latitudeDelta: 0.3,
+          longitudeDelta: 0.3,
         });
       }
     })();
   }, []);
 
-  // Search function with better error handling
-  const searchLocation = async (query: string) => {
-    if (!query.trim() || query.length < 3) {
+  // Enhanced search function that includes Singapore areas
+  const performSearch = async (query: string) => {
+    if (!query.trim() || query.length < 2) {
       setSearchResults([]);
+      setFilteredAreas([]);
       setShowSearchResults(false);
+      setShowAreaResults(false);
       return;
     }
     
-    setIsSearching(true);
-    
-    // Create abort controller for timeout
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-    
-    try {
-      const response = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`,
-        { 
-          headers: { "User-Agent": "LocationReminderApp/1.0" },
-          signal: controller.signal
+    // Filter Singapore areas
+    const matchingAreas = SINGAPORE_AREAS.filter(area =>
+      area.name.toLowerCase().includes(query.toLowerCase())
+    );
+    setFilteredAreas(matchingAreas);
+    setShowAreaResults(matchingAreas.length > 0);
+
+    // Also search general locations if query is longer
+    if (query.length >= 3) {
+      setIsSearching(true);
+      
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 10000);
+      
+      try {
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1&countrycodes=sg`,
+          { 
+            headers: { "User-Agent": "LocationReminderApp/1.0" },
+            signal: controller.signal
+          }
+        );
+        
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+          const data = await response.json();
+          setSearchResults(Array.isArray(data) ? data : []);
+          setShowSearchResults(Array.isArray(data) && data.length > 0);
         }
-      );
-      
-      clearTimeout(timeoutId);
-      
-      if (!response.ok) {
-        throw new Error(`Search failed: ${response.status}`);
+      } catch (error) {
+        console.error("Search error:", error);
+        setSearchResults([]);
+        setShowSearchResults(false);
+      } finally {
+        setIsSearching(false);
       }
-      
-      const data = await response.json();
-      setSearchResults(Array.isArray(data) ? data : []);
-      setShowSearchResults(Array.isArray(data) && data.length > 0);
-    } catch (error) {
-      clearTimeout(timeoutId);
-      console.error("Search error:", error);
-      
-      if (error instanceof Error && error.name === 'AbortError') {
-        Alert.alert("Search Timeout", "Search request timed out. Please try again.");
-      } else {
-        Alert.alert("Search Error", "Could not fetch search results. Please try again.");
-      }
-      
-      setSearchResults([]);
-      setShowSearchResults(false);
-    } finally {
-      setIsSearching(false);
     }
   };
 
@@ -164,30 +283,59 @@ export default function MapScreen({
   const handleSearchInput = (text: string) => {
     setSearchQuery(text);
     if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    searchTimeoutRef.current = setTimeout(() => searchLocation(text), 500);
+    searchTimeoutRef.current = setTimeout(() => performSearch(text), 300);
   };
 
-  // Select a search result with validation
+  // Select a Singapore area
+  const handleAreaSelect = (area: typeof SINGAPORE_AREAS[0]) => {
+    const newRegion = { 
+      latitude: area.coordinates.latitude, 
+      longitude: area.coordinates.longitude, 
+      latitudeDelta: 0.005, 
+      longitudeDelta: 0.005 
+    };
+    setRegion(newRegion);
+    setSearchMarker({ 
+      latitude: area.coordinates.latitude, 
+      longitude: area.coordinates.longitude, 
+      title: area.name,
+      areaName: area.name
+    });
+    mapRef.current?.animateToRegion(newRegion, 1000);
+    setSearchQuery(area.name);
+    setFilteredAreas([]);
+    setShowAreaResults(false);
+    setShowSearchResults(false);
+    Keyboard.dismiss();
+  };
+
+  // Select a search result
   const handleSearchResultSelect = (result: SearchResult) => {
     try {
       const latitude = parseFloat(result.lat);
       const longitude = parseFloat(result.lon);
       
-      // Validate coordinates
-      if (isNaN(latitude) || isNaN(longitude) || 
-          latitude < -90 || latitude > 90 || 
-          longitude < -180 || longitude > 180) {
+      if (isNaN(latitude) || isNaN(longitude)) {
         Alert.alert("Invalid Location", "The selected location has invalid coordinates.");
         return;
       }
+
+      // Find nearest Singapore area
+      const { area } = findNearestArea(latitude, longitude);
       
       const newRegion = { latitude, longitude, latitudeDelta: 0.005, longitudeDelta: 0.005 };
       setRegion(newRegion);
-      setSearchMarker({ latitude, longitude, title: result.display_name.split(",")[0] });
+      setSearchMarker({ 
+        latitude, 
+        longitude, 
+        title: result.display_name.split(",")[0],
+        areaName: area.name
+      });
       mapRef.current?.animateToRegion(newRegion, 1000);
       setSearchQuery(result.display_name.split(",")[0]);
       setSearchResults([]);
       setShowSearchResults(false);
+      setShowAreaResults(false);
       Keyboard.dismiss();
     } catch (error) {
       console.error("Error selecting search result:", error);
@@ -195,29 +343,29 @@ export default function MapScreen({
     }
   };
 
-  // Map press: pick location with validation
+  // Map press: pick location and find nearest area
   const handleMapPress = (event: MapPressEvent) => {
-    if (showSearchResults) {
+    if (showSearchResults || showAreaResults) {
       setShowSearchResults(false);
+      setShowAreaResults(false);
       return;
     }
     
     try {
       const coordinate = event.nativeEvent.coordinate;
       
-      // Validate coordinates
-      if (!coordinate || 
-          typeof coordinate.latitude !== 'number' || 
-          typeof coordinate.longitude !== 'number' ||
-          isNaN(coordinate.latitude) || 
-          isNaN(coordinate.longitude)) {
+      if (!coordinate || isNaN(coordinate.latitude) || isNaN(coordinate.longitude)) {
         Alert.alert("Invalid Location", "Could not get valid coordinates for this location.");
         return;
       }
+
+      // Find nearest Singapore area
+      const { area, distance } = findNearestArea(coordinate.latitude, coordinate.longitude);
       
       setSelectedLocation({
         latitude: coordinate.latitude,
-        longitude: coordinate.longitude
+        longitude: coordinate.longitude,
+        areaName: area.name
       });
       setModalVisible(true);
     } catch (error) {
@@ -226,7 +374,7 @@ export default function MapScreen({
     }
   };
 
-  // Assign location to reminder with validation
+  // Assign location to reminder with area name
   const handleAssignLocation = async (reminderId: string) => {
     if (!selectedLocation) {
       Alert.alert("Error", "No location selected.");
@@ -234,14 +382,20 @@ export default function MapScreen({
     }
     
     try {
-      await onAssignLocation(reminderId, {
+      // Use the area name for weather compatibility
+      const locationData = {
+        name: selectedLocation.areaName || 'Unknown Area',
         latitude: selectedLocation.latitude,
         longitude: selectedLocation.longitude,
         proximity: selectedProximity,
-      });
+      };
+
+      console.log('🗺️ Assigning location with area name:', locationData);
+      
+      await onAssignLocation(reminderId, locationData);
       setSelectedLocation(null);
       setModalVisible(false);
-      setSelectedProximity(10);
+      setSelectedProximity(100);
     } catch (error) {
       console.error("Error assigning location:", error);
       const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
@@ -274,19 +428,24 @@ export default function MapScreen({
         <View style={styles.searchBar}>
           <TextInput
             style={styles.searchInput}
-            placeholder="Search locations..."
+            placeholder="Search Singapore areas or locations..."
             value={searchQuery}
             onChangeText={handleSearchInput}
-            onFocus={() => searchQuery.length >= 3 && setShowSearchResults(true)}
-            onBlur={() => setTimeout(() => setShowSearchResults(false), 200)}
+            onFocus={() => {
+              if (searchQuery.length >= 2) {
+                performSearch(searchQuery);
+              }
+            }}
             returnKeyType="search"
-            onSubmitEditing={() => searchLocation(searchQuery)}
+            onSubmitEditing={() => performSearch(searchQuery)}
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity onPress={() => { 
               setSearchQuery(""); 
               setSearchResults([]); 
+              setFilteredAreas([]);
               setShowSearchResults(false); 
+              setShowAreaResults(false);
               setSearchMarker(null);
             }}>
               <Text style={{ fontSize: 16, padding: 5 }}>✕</Text>
@@ -295,6 +454,25 @@ export default function MapScreen({
           {isSearching && <ActivityIndicator size="small" color="#007AFF" />}
         </View>
         
+        {/* Singapore Areas Results */}
+        {showAreaResults && filteredAreas.length > 0 && (
+          <FlatList
+            data={filteredAreas}
+            keyExtractor={(item) => item.name}
+            style={[styles.searchResults, { backgroundColor: '#e8f5e8' }]}
+            renderItem={({ item }) => (
+              <TouchableOpacity 
+                onPress={() => handleAreaSelect(item)} 
+                style={styles.searchItem}
+              >
+                <Text style={{ fontWeight: 'bold' }}>📍 {item.name}</Text>
+                <Text style={{ fontSize: 12, color: '#666' }}>Singapore Area (Weather Available)</Text>
+              </TouchableOpacity>
+            )}
+          />
+        )}
+
+        {/* General Search Results */}
         {showSearchResults && searchResults.length > 0 && (
           <FlatList
             data={searchResults}
@@ -321,11 +499,24 @@ export default function MapScreen({
         showsUserLocation
         onRegionChangeComplete={(r) => setRegion(r)}
       >
+        {/* Singapore area markers */}
+        {SINGAPORE_AREAS.map((area, index) => (
+          <Marker
+            key={`area-${index}`}
+            coordinate={area.coordinates}
+            title={area.name}
+            description="Singapore Area - Weather Available"
+            pinColor="blue"
+            onPress={() => handleAreaSelect(area)}
+          />
+        ))}
+
         {/* Search marker */}
         {searchMarker && (
           <Marker 
             coordinate={searchMarker} 
-            title={searchMarker.title} 
+            title={searchMarker.title}
+            description={searchMarker.areaName ? `Nearest: ${searchMarker.areaName}` : undefined}
             pinColor="green" 
           />
         )}
@@ -339,7 +530,7 @@ export default function MapScreen({
               longitude: reminder.location!.longitude 
             }}
             title={reminder.title}
-            description={reminder.category}
+            description={`${reminder.category} • ${reminder.location!.name || 'Location'}`}
             pinColor="orange"
           />
         ))}
@@ -348,8 +539,9 @@ export default function MapScreen({
         {selectedLocation && (
           <Marker 
             coordinate={selectedLocation} 
-            pinColor="blue" 
-            title="Selected Location" 
+            pinColor="red" 
+            title="Selected Location"
+            description={selectedLocation.areaName ? `Area: ${selectedLocation.areaName}` : undefined}
           />
         )}
       </MapView>
@@ -358,13 +550,24 @@ export default function MapScreen({
       <Modal visible={isModalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={{ fontWeight: "bold", marginBottom: 10 }}>
-              Set Proximity & Choose Reminder
+            <Text style={{ fontWeight: "bold", marginBottom: 10, fontSize: 16 }}>
+              Assign Location to Reminder
             </Text>
             
-            <Text>Proximity:</Text>
+            {selectedLocation?.areaName && (
+              <View style={{ backgroundColor: '#e8f5e8', padding: 10, borderRadius: 8, marginBottom: 10 }}>
+                <Text style={{ fontWeight: 'bold', color: '#2d5a2d' }}>
+                  📍 Singapore Area: {selectedLocation.areaName}
+                </Text>
+                <Text style={{ fontSize: 12, color: '#666' }}>
+                  Weather data will be available for this location
+                </Text>
+              </View>
+            )}
+            
+            <Text style={{ marginBottom: 5 }}>Notification Distance:</Text>
             <View style={styles.proximityOptions}>
-              {[1, 10, 25, 50].map(proximity => (
+              {[10, 50, 100, 200, 500].map(proximity => (
                 <TouchableOpacity
                   key={proximity}
                   onPress={() => setSelectedProximity(proximity)}
@@ -380,24 +583,33 @@ export default function MapScreen({
               ))}
             </View>
             
-            <Text style={{ marginTop: 10, marginBottom: 5 }}>Select Reminder:</Text>
+            <Text style={{ marginTop: 15, marginBottom: 5, fontWeight: 'bold' }}>
+              {reminderToAssign ? 'Confirm Assignment:' : 'Select Reminder:'}
+            </Text>
+            
             <FlatList
-              data={reminders || []}
+              data={reminderToAssign ? reminders.filter(r => r.id === reminderToAssign) : reminders}
               keyExtractor={(item) => item.id}
               style={{ maxHeight: 200 }}
               renderItem={({ item }) => (
                 <TouchableOpacity 
-                  style={styles.reminderItem} 
+                  style={[
+                    styles.reminderItem,
+                    reminderToAssign === item.id && { backgroundColor: '#007AFF' }
+                  ]} 
                   onPress={() => handleAssignLocation(item.id)}
                 >
-                  <Text>{item.title} ({item.category})</Text>
+                  <Text style={reminderToAssign === item.id ? { color: 'white' } : undefined}>
+                    {item.title} ({item.category})
+                    {item.isOutdoor && ' 🌳'}
+                  </Text>
                 </TouchableOpacity>
               )}
             />
             
             <TouchableOpacity 
               onPress={() => setModalVisible(false)} 
-              style={{ marginTop: 15, alignItems: 'center' }}
+              style={{ marginTop: 15, alignItems: 'center', padding: 10 }}
             >
               <Text style={{ color: "red", fontWeight: 'bold' }}>Cancel</Text>
             </TouchableOpacity>
@@ -459,14 +671,16 @@ const styles = StyleSheet.create({
   },
   proximityOptions: { 
     flexDirection: "row", 
-    marginVertical: 10 
+    marginVertical: 10,
+    flexWrap: 'wrap'
   },
   proximityButton: { 
     borderWidth: 1, 
     borderColor: "#007AFF", 
     borderRadius: 20, 
     padding: 8, 
-    marginHorizontal: 5 
+    marginHorizontal: 3,
+    marginVertical: 2
   },
   proximitySelected: { 
     backgroundColor: "#007AFF" 

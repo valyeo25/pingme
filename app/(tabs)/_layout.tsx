@@ -6,9 +6,16 @@ import { IconSymbol } from '@/components/ui/IconSymbol';
 import TabBarBackground from '@/components/ui/TabBarBackground';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
+import { ActivityIndicator, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { router } from 'expo-router';
+import auth from '@react-native-firebase/auth';
+
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
+  const [initializing, setInitializing] = useState(true);
+  const [user, setUser] = useState(null);
 
   return (
     <Tabs

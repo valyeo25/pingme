@@ -9,6 +9,10 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
+      "infoPlist": {
+        "NSCalendarsUsageDescription": "This app needs access to calendar to create reminders and events.",
+        "NSRemindersUsageDescription": "This app needs access to reminders to manage your tasks."
+      },
       "supportsTablet": true,
       "bundleIdentifier": "com.orbital.pingme",
       "googleServicesFile": "./GoogleService-Info.plist"
@@ -20,7 +24,8 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.orbital.pingme",
-      "googleServicesFile": "./google-services.json"
+      "googleServicesFile": "./google-services.json",
+      "permissions": ["READ_CALENDAR", "WRITE_CALENDAR"]
     },
     "web": {
       "bundler": "metro",
@@ -29,6 +34,7 @@
     },
     "plugins": [
       "expo-router",
+      "expo-calendar",
       [
         "expo-splash-screen",
         {
@@ -46,13 +52,18 @@
           }
         }
       ],
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.140525205614-anibcmf0l2uko7kcdglmekuti2mlljq7"
+        }
+      ],
       "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true
     },
     "extra": {
-      "googleMapsApiKey": "YOUR_GOOGLE_MAPS_API_KEY",
       "router": {},
       "eas": {
         "projectId": "c7b0883c-828b-4a2b-ac14-9208f3502313"

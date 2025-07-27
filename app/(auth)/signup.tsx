@@ -35,7 +35,7 @@ const SignUpScreen = () => {
         try {
             await auth().createUserWithEmailAndPassword(email, password).then(() => {
                 Alert.alert("Success", "User created successfully", [
-                    {text: "OK", onPress: () => router.replace('/')}
+                    {text: "OK", onPress: () => router.replace('/(auth)')}
                 ]);
             });
 

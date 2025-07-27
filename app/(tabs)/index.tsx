@@ -13,7 +13,6 @@ import {
   View,
   ActivityIndicator
 } from "react-native";
-import { API_ENDPOINTS } from "../../config/api";
 import { NotificationService } from "../../services/notificationService";
 import MapScreen from "./map";
 import { Keyboard } from 'react-native';
@@ -24,9 +23,12 @@ type Reminder = {
   title: string;
   category: string;
   isActive: boolean;
+  isOutdoor?: boolean;
   location?: {
+    name: string;
     latitude: number;
     longitude: number;
+    proximity?: number;
   };
 };
 
@@ -41,8 +43,16 @@ type WeatherData = {
 };
 
 type ReminderWithWeather = Reminder & {
+  location?: Location;
   weather?: WeatherData;
   weatherAlert?: string | null;
+};
+
+type Location = {
+  name: string;
+  latitude: number;
+  longitude: number;
+  proximity?: number;
 };
 
 const categoryColors: Record<string, string> = {
@@ -57,6 +67,12 @@ function getColorForCategory(category: string): string {
   return categoryColors[category] || "#f0f0f0";
 }
 
+const API_ENDPOINTS = {
+  REMINDERS: "http://192.168.219.161:5002/api/reminders", 
+  REMINDER_BY_ID: (id: string) => `http://192.168.219.161:5002/api/reminders/${id}`,
+  WEATHER_REMINDERS_BATCH: "http://192.168.219.161:5002/api/weather/reminders-batch",
+};
+
 export default function RemindersScreen(): React.ReactElement {
   const router = useRouter();
 
@@ -66,6 +82,7 @@ export default function RemindersScreen(): React.ReactElement {
   const [isModalVisible, setModalVisible] = useState(false);
   const [newReminderTitle, setNewReminderTitle] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [isOutdoor, setIsOutdoor] = useState(false);
   const [isMapVisible, setMapVisible] = useState(false);
   const [reminderToAssign, setReminderToAssign] = useState<string | null>(null);
   
@@ -127,107 +144,114 @@ export default function RemindersScreen(): React.ReactElement {
     Alert.alert("Test Sent", "Check if you received a test notification!");
   };
 
-  // API Functions
-  // First, let's debug your weatherService.processRemindersBatch function
-// Add this enhanced logging to your loadReminders function:
-
-  const addWeatherDataToReminders = async (reminders: any[]): Promise<ReminderWithWeather[]> => {
-    try {
-      // Filter reminders with location
-      const remindersWithLocation = reminders.filter(r => 
-        r.location?.latitude && r.location?.longitude
-      );
-
-      console.log("📍 Processing weather for", remindersWithLocation.length, "reminders with location");
-
-      const enhancedReminders = reminders.map((reminder: any, index: number) => {
-        if (reminder.location?.latitude && reminder.location?.longitude) {
-
-          const lat = reminder.location.latitude;
-          const lng = reminder.location.longitude;
-          
-          const isSingapore = lat > 0 && lat < 10 && lng > 100;
-          const isSanFrancisco = lat > 35 && lat < 40 && lng < -120;
-          
-          let weatherData = {
-            area: isSingapore ? "Singapore" : isSanFrancisco ? "San Francisco, CA" : "Unknown Location",
-            forecast: "",
-            icon: "",
-            recommendation: "",
-            timestamp: new Date().toISOString(),
-            cached_at: new Date().toISOString(),
-            warning: false
-          };
-
-          // Add some variety based on location and index
-          if (isSingapore) {
-            weatherData.forecast = index % 2 === 0 ? "Hot and humid with afternoon thunderstorms" : "Partly cloudy, warm and muggy";
-            weatherData.icon = index % 2 === 0 ? "⛈️" : "🌤️";
-            weatherData.recommendation = index % 2 === 0 ? "Carry an umbrella and stay hydrated" : "Light clothing recommended";
-            weatherData.warning = index % 3 === 0;
-          } else if (isSanFrancisco) {
-            weatherData.forecast = index % 2 === 0 ? "Cool and foggy with light drizzle" : "Sunny but cool, typical SF weather";
-            weatherData.icon = index % 2 === 0 ? "🌫️" : "🌤️";
-            weatherData.recommendation = index % 2 === 0 ? "Bring a jacket and umbrella" : "Layer up, it gets chilly";
-            weatherData.warning = index % 4 === 0;
-          } else {
-            weatherData.forecast = "Weather data available for this location";
-            weatherData.icon = "🌡️";
-            weatherData.recommendation = "Check local weather for details";
-          }
-
-          return {
-            ...reminder,
-            weather: weatherData,
-            weatherAlert: weatherData.warning ? "Weather advisory in effect" : null
-          };
-        }
-        
-        return reminder;
-      });
-
-      return enhancedReminders;
-      
-    } catch (error) {
-      console.error("❌ Error adding weather data:", error);
-      // Return original reminders if weather processing fails
-      return reminders;
-    }
+  // Helper functions
+  const resetDeleteModal = () => {
+    setDeleteModalVisible(false);
+    setSelectedReminder(null);
   };
 
+  const resetModal = () => {
+    setModalVisible(false);
+    setNewReminderTitle("");
+    setSelectedCategory(null);
+    setIsOutdoor(false); // This resets to false every time
+  };
+
+  // Load reminders function with complete weather API flow
   const loadReminders = async (): Promise<void> => {
+    setIsLoading(true);
     try {
-      console.log("🔄 Fetching reminders from:", API_ENDPOINTS.REMINDERS);
+      console.log("🔄 Starting to load reminders...");
+      
+      // Step 1: Fetch reminders
+      console.log("📡 Fetching from:", API_ENDPOINTS.REMINDERS);
       const response = await fetch(API_ENDPOINTS.REMINDERS);
-      if (response.ok) {
-        const data = await response.json();
-        if (Array.isArray(data)) {
-          const formattedReminders = data.map((reminder: any) => ({
-            ...reminder,
-            id: reminder._id,
-          }));
-
-          console.log("📋 Formatted reminders:", formattedReminders);
-
-          // TEMPORARY SOLUTION: Add working weather data
-          const enhancedReminders = await addWeatherDataToReminders(formattedReminders);
-          
-          console.log("✅ Enhanced reminders with weather:", enhancedReminders);
-          setReminders(enhancedReminders);
-
-        } else {
-          console.error("❌ Expected array, got object:", data);
-          setReminders([]);
-          Alert.alert("Error", "Backend didn't return reminders properly");
-        }
-      } else {
+      console.log("📡 Reminders response status:", response.status);
+      
+      if (!response.ok) {
         const errorText = await response.text();
-        console.error("❌ Failed to load reminders:", errorText);
-        Alert.alert("Error", `Failed to load reminders: ${response.status}`);
+        console.error("❌ Reminders fetch failed:", errorText);
+        throw new Error(`Failed to fetch reminders: ${response.status}`);
       }
-    } catch (error) {
-      console.error("❌ Network error loading reminders:", error);
-      Alert.alert("Error", "Couldn't connect to server");
+
+      const data = await response.json();
+      console.log("📝 Raw reminders data:", JSON.stringify(data, null, 2));
+      console.log("📝 Number of reminders fetched:", data.length);
+
+      // Step 2: Format reminders
+      console.log("🔧 Starting to format reminders...");
+      const formattedReminders: Reminder[] = data.map((r: any, index: number) => {
+        console.log(`🔧 Processing reminder ${index + 1}:`, r);
+        console.log(`🔧 Raw isOutdoor value:`, r.isOutdoor, typeof r.isOutdoor);
+        
+        const formatted = {
+          id: r._id,
+          title: r.title,
+          category: r.category,
+          isActive: r.isActive ?? true,
+          isOutdoor: r.isOutdoor ?? false, // This might be the issue
+          location: r.location,
+        };
+        console.log(`🔧 Formatted reminder ${index + 1}:`, JSON.stringify(formatted, null, 2));
+        return formatted;
+      });
+
+      console.log("📋 All formatted reminders:", JSON.stringify(formattedReminders, null, 2));
+
+      // Step 3: Prepare weather request
+      const weatherRequestBody = { reminders: formattedReminders };
+      console.log("🌤️ Weather request body:", JSON.stringify(weatherRequestBody, null, 2));
+
+      // Step 4: Fetch weather for reminders batch
+      console.log("🌤️ Fetching weather data from:", API_ENDPOINTS.WEATHER_REMINDERS_BATCH);
+      
+      const weatherResponse = await fetch(API_ENDPOINTS.WEATHER_REMINDERS_BATCH, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(weatherRequestBody),
+      });
+
+      console.log("🌤️ Weather response status:", weatherResponse.status);
+
+      if (!weatherResponse.ok) {
+        const errorText = await weatherResponse.text();
+        console.error("❌ Weather API error:", errorText);
+        // Don't throw error, just use reminders without weather
+        console.warn("⚠️ Using reminders without weather data");
+        setReminders(formattedReminders);
+        return;
+      }
+
+      const weatherData = await weatherResponse.json();
+      console.log("🌤️ Weather response data:", JSON.stringify(weatherData, null, 2));
+
+      // Step 5: Check if weather data has the expected structure
+      if (weatherData && weatherData.reminders) {
+        console.log("✅ Weather data structure is correct");
+        console.log("📊 Number of reminders with weather:", weatherData.reminders.length);
+        
+        // Log each reminder with weather
+        weatherData.reminders.forEach((reminder: any, index: number) => {
+          console.log(`🔍 Reminder ${index + 1}:`, {
+            id: reminder.id,
+            title: reminder.title,
+            hasWeather: !!reminder.weather,
+            hasWeatherAlert: !!reminder.weatherAlert,
+            weather: reminder.weather,
+            weatherAlert: reminder.weatherAlert
+          });
+        });
+        
+        setReminders(weatherData.reminders);
+      } else {
+        console.warn("⚠️ Unexpected weather data structure:", weatherData);
+        // Fallback: set reminders without weather
+        setReminders(formattedReminders);
+      }
+
+    } catch (error: any) {
+      console.error("❌ Error in loadReminders:", error);
+      Alert.alert("Error", error.message || "Failed to load reminders");
     } finally {
       setIsLoading(false);
     }
@@ -293,31 +317,49 @@ export default function RemindersScreen(): React.ReactElement {
     const newReminder = {
       title: newReminderTitle.trim(),
       category: selectedCategory,
+      isOutdoor,
       isActive: true,
     };
 
+    // Debug log to see what we're sending
+    console.log("🔄 Creating new reminder with isOutdoor:", isOutdoor);
+    console.log("🔄 Full reminder object:", JSON.stringify(newReminder, null, 2));
+    console.log("🔄 Sending to API endpoint:", API_ENDPOINTS.REMINDERS);
+
     try {
-      console.log("🔄 Creating new reminder:", newReminder);
       const response = await fetch(API_ENDPOINTS.REMINDERS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newReminder),
       });
 
+      console.log("🔄 Response status:", response.status);
+      console.log("🔄 Response headers:", JSON.stringify([...response.headers.entries()]));
+
       if (response.ok) {
         const savedReminder = await response.json();
-        console.log("✅ Reminder created:", savedReminder);
+        console.log("✅ Reminder created by backend:", JSON.stringify(savedReminder, null, 2));
+        console.log("✅ Backend returned isOutdoor:", savedReminder.isOutdoor, typeof savedReminder.isOutdoor);
         
         // Add to local state with proper id conversion
-        setReminders((prev) => [...prev, { ...savedReminder, id: savedReminder._id }]);
+        const reminderToAdd = { ...savedReminder, id: savedReminder._id };
+        console.log("✅ Adding to local state:", JSON.stringify(reminderToAdd, null, 2));
+        setReminders((prev) => [...prev, reminderToAdd]);
         
         // Reset form
         setModalVisible(false);
         setNewReminderTitle("");
         setSelectedCategory(null);
+        setIsOutdoor(false);
+        
+        // Reload reminders to double-check
+        console.log("🔄 Reloading reminders to verify...");
+        setTimeout(() => {
+          loadReminders();
+        }, 1000);
       } else {
         const errorText = await response.text();
-        console.error("❌ Failed to create reminder:", errorText);
+        console.error("❌ Failed to create reminder:", response.status, errorText);
         Alert.alert("Error", "Failed to save reminder");
       }
     } catch (error) {
@@ -326,7 +368,6 @@ export default function RemindersScreen(): React.ReactElement {
     }
   };
 
-  // Delete reminder function
   const deleteReminder = async (id: string): Promise<void> => {
     try {
       console.log("🔄 Deleting reminder:", id);
@@ -356,7 +397,6 @@ export default function RemindersScreen(): React.ReactElement {
     }
   };
 
-  // Handle reminder press
   const handleReminderPress = (reminder: Reminder): void => {
     setSelectedReminder(reminder);
     setDeleteModalVisible(true);
@@ -364,7 +404,7 @@ export default function RemindersScreen(): React.ReactElement {
 
   const onAssignLocation = async (
     reminderId: string,
-    location: { latitude: number; longitude: number; proximity: number }
+    location: { name: string; latitude: number; longitude: number; proximity: number }
   ): Promise<void> => {
     Keyboard.dismiss()
     
@@ -416,9 +456,12 @@ export default function RemindersScreen(): React.ReactElement {
     }, 100);
   };
 
-  // Weather display component
+  // Enhanced renderWeatherInfo function with better debugging
   const renderWeatherInfo = (weather: WeatherData | undefined, weatherAlert: string | null | undefined) => {
+    console.log("🎨 Rendering weather info:", { weather, weatherAlert });
+    
     if (!weather && !weatherAlert) {
+      console.log("ℹ️ No weather or alert data to display");
       return null;
     }
 
@@ -456,71 +499,72 @@ export default function RemindersScreen(): React.ReactElement {
     );
   };
 
-  // UI Components
-  const renderReminder = (item: ReminderWithWeather) => (
-    <TouchableOpacity 
-      style={styles.reminderBox} 
-      key={item.id}
-      onPress={() => handleReminderPress(item)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.reminderContent}>
-        <Text style={styles.title}>{item.title}</Text>
-        
-        {/* Location coordinates display */}
-        {item.location?.latitude != null && item.location?.longitude != null && (
-          <Text style={styles.locationText}>
-            📍 {item.location.latitude.toFixed(4)}, {item.location.longitude.toFixed(4)}
-          </Text>
-        )}
+  // Updated renderReminder function with better debugging
+  const renderReminder = (item: ReminderWithWeather) => {
+    console.log("🎨 Rendering reminder:", {
+      id: item.id,
+      title: item.title,
+      hasLocation: !!item.location,
+      hasWeather: !!item.weather,
+      hasWeatherAlert: !!item.weatherAlert,
+      isOutdoor: item.isOutdoor
+    });
 
-        {/* Weather information display */}
-        {(item.weather || item.weatherAlert) && renderWeatherInfo(item.weather, item.weatherAlert)}
-      </View>
-      
-      <View style={styles.reminderActions}>
-        <Switch 
-          value={item.isActive} 
-          onValueChange={() => toggleReminder(item.id)} 
-          trackColor={{ false: "#767577", true: "#81b0ff" }}
-          thumbColor={item.isActive ? "#f5dd4b" : "#f4f3f4"}
-        />
-        <TouchableOpacity
-          style={styles.assignLocationButton}
-          onPress={(e) => {
-            e.stopPropagation(); // Prevent triggering the reminder press
-            setReminderToAssign(item.id);
-            setMapVisible(true);
-          }}
-        >
-          <Text style={styles.assignLocationText}>
-            {item.location ? "📍" : "📍+"}
-          </Text>
-        </TouchableOpacity>
-      </View>
-    </TouchableOpacity>
-  );
-
-  const resetModal = () => {
-    setModalVisible(false);
-    setNewReminderTitle("");
-    setSelectedCategory(null);
-  };
-
-  const resetDeleteModal = () => {
-    setDeleteModalVisible(false);
-    setSelectedReminder(null);
-  };
-
-  // Loading state
-  if (isLoading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#007AFF" />
-        <Text style={styles.loadingText}>Loading reminders...</Text>
-      </View>
+      <TouchableOpacity
+        style={styles.reminderBox}
+        key={item.id}
+        onPress={() => handleReminderPress(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.reminderContent}>
+          <Text style={styles.title}>{item.title}</Text>
+
+          {/* Show if it's an outdoor reminder */}
+          {item.isOutdoor && (
+            <Text style={styles.locationText}>🌳 Outdoor Activity</Text>
+          )}
+
+          {/* Show location name if available */}
+          {item.location && (
+            <Text style={styles.locationText}>📍 {item.location.name}</Text>
+          )}
+
+          {/* Weather info only shown if weather data or alert exists */}
+          {(item.weather || item.weatherAlert) &&
+            renderWeatherInfo(item.weather, item.weatherAlert)}
+          
+          {/* Debug info - remove this in production */}
+          {__DEV__ && (
+            <Text style={{fontSize: 10, color: 'red'}}>
+              Debug: Weather={!!item.weather}, Alert={!!item.weatherAlert}, Outdoor={!!item.isOutdoor}
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.reminderActions}>
+          <Switch
+            value={item.isActive}
+            onValueChange={() => toggleReminder(item.id)}
+            trackColor={{ false: "#767577", true: "#81b0ff" }}
+            thumbColor={item.isActive ? "#f5dd4b" : "#f4f3f4"}
+          />
+          <TouchableOpacity
+            style={styles.assignLocationButton}
+            onPress={(e) => {
+              e.stopPropagation();
+              setReminderToAssign(item.id);
+              setMapVisible(true);
+            }}
+          >
+            <Text style={styles.assignLocationText}>
+              {item.location ? "📍" : "📍+"}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </TouchableOpacity>
     );
-  }
+  };
 
   return (
     <ImageBackground
@@ -620,10 +664,35 @@ export default function RemindersScreen(): React.ReactElement {
               autoFocus
               maxLength={100}
             />
+            
+            {/* Debug info to see current state */}
+            <Text style={{ fontSize: 12, color: 'blue', marginBottom: 10 }}>
+              Debug: isOutdoor = {isOutdoor ? 'true' : 'false'}
+            </Text>
+            
+            <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10 }}>
+              <Text style={{ marginRight: 10 }}>Is Outdoor</Text>
+              <Switch
+                value={isOutdoor}
+                onValueChange={(value) => {
+                  console.log("🔄 Switch toggled to:", value);
+                  setIsOutdoor(value);
+                }}
+                trackColor={{ false: "#767577", true: "#81b0ff" }}
+                thumbColor={isOutdoor ? "#f5dd4b" : "#f4f3f4"}
+              />
+              <Text style={{ marginLeft: 10, color: isOutdoor ? 'green' : 'red' }}>
+                {isOutdoor ? 'ON' : 'OFF'}
+              </Text>
+            </View>
+            
             <View style={styles.buttonContainer}>
               <TouchableOpacity 
                 style={styles.button} 
-                onPress={addReminder}
+                onPress={() => {
+                  console.log("🔄 About to create reminder with isOutdoor:", isOutdoor);
+                  addReminder();
+                }}
                 activeOpacity={0.8}
               >
                 <Text style={styles.buttonText}>Add Reminder</Text>

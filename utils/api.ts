@@ -1,6 +1,6 @@
 // api.ts
 
-const BASE_URL = 'http://10.0.2.2:5000/api/reminders'; // Android emulator URL. Replace if testing on physical device.
+const BASE_URL = 'http://192.168.219.161:5002/api/reminders'; // Android emulator URL. Replace if testing on physical device.
 
 /** Reminder type definition */
 export type Reminder = {
