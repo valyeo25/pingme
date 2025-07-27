@@ -11,12 +11,14 @@ import {
   TextInput,
   TouchableOpacity,
   View,
-  ActivityIndicator
+  ActivityIndicator,
+  Platform
 } from "react-native";
 import { NotificationService } from "../../services/notificationService";
 import MapScreen from "./map";
 import { Keyboard } from 'react-native';
 import weatherService from "../../services/weatherServices";
+import DateTimePicker from '@react-native-community/datetimepicker';
 
 type Reminder = {
   id: string;
@@ -30,6 +32,7 @@ type Reminder = {
     longitude: number;
     proximity?: number;
   };
+  date?: Date;
 };
 
 type WeatherData = {
@@ -46,6 +49,7 @@ type ReminderWithWeather = Reminder & {
   location?: Location;
   weather?: WeatherData;
   weatherAlert?: string | null;
+  date?: Date;
 };
 
 type Location = {
@@ -86,6 +90,12 @@ export default function RemindersScreen(): React.ReactElement {
   const [isMapVisible, setMapVisible] = useState(false);
   const [reminderToAssign, setReminderToAssign] = useState<string | null>(null);
   
+  // Fixed: Added missing state variables
+  const [isCalendarVisible, setCalendarVisible] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
+  const [dateForReminder, setDateForReminder] = useState<Record<string, Date>>({});
+  const [selectedReminderForDate, setSelectedReminderForDate] = useState<string | null>(null);
+  
   // Delete modal state
   const [isDeleteModalVisible, setDeleteModalVisible] = useState(false);
   const [selectedReminder, setSelectedReminder] = useState<Reminder | null>(null);
@@ -100,10 +110,25 @@ export default function RemindersScreen(): React.ReactElement {
     checkTrackingStatus();
   }, []);
 
+  // Fixed: Proper onChange handler for date picker
+  const onChange = (event: any, selectedDate?: Date) => {
+    setShowPicker(Platform.OS === 'ios'); // keep open on iOS, close on Android
+    if (selectedDate && selectedReminderForDate) {
+      setDateForReminder(prev => ({
+        ...prev,
+        [selectedReminderForDate]: selectedDate
+      }));
+    }
+  };
+
   // Check tracking status
   const checkTrackingStatus = async () => {
-    const isTracking = await NotificationService.getTrackingStatus();
-    setLocationTrackingEnabled(isTracking);
+    try {
+      const isTracking = await NotificationService.getTrackingStatus();
+      setLocationTrackingEnabled(isTracking);
+    } catch (error) {
+      console.error("Error checking tracking status:", error);
+    }
   };
 
   // Toggle location tracking
@@ -140,8 +165,13 @@ export default function RemindersScreen(): React.ReactElement {
 
   // Test notification function
   const testNotification = async () => {
-    await NotificationService.sendTestNotification();
-    Alert.alert("Test Sent", "Check if you received a test notification!");
+    try {
+      await NotificationService.sendTestNotification();
+      Alert.alert("Test Sent", "Check if you received a test notification!");
+    } catch (error) {
+      console.error("Error sending test notification:", error);
+      Alert.alert("Error", "Failed to send test notification");
+    }
   };
 
   // Helper functions
@@ -154,7 +184,7 @@ export default function RemindersScreen(): React.ReactElement {
     setModalVisible(false);
     setNewReminderTitle("");
     setSelectedCategory(null);
-    setIsOutdoor(false); // This resets to false every time
+    setIsOutdoor(false);
   };
 
   // Load reminders function with complete weather API flow
@@ -189,8 +219,9 @@ export default function RemindersScreen(): React.ReactElement {
           title: r.title,
           category: r.category,
           isActive: r.isActive ?? true,
-          isOutdoor: r.isOutdoor ?? false, // This might be the issue
+          isOutdoor: Boolean(r.isOutdoor), // Ensure boolean conversion
           location: r.location,
+          date: r.date ? new Date(r.date) : undefined,
         };
         console.log(`🔧 Formatted reminder ${index + 1}:`, JSON.stringify(formatted, null, 2));
         return formatted;
@@ -334,29 +365,20 @@ export default function RemindersScreen(): React.ReactElement {
       });
 
       console.log("🔄 Response status:", response.status);
-      console.log("🔄 Response headers:", JSON.stringify([...response.headers.entries()]));
 
       if (response.ok) {
         const savedReminder = await response.json();
         console.log("✅ Reminder created by backend:", JSON.stringify(savedReminder, null, 2));
         console.log("✅ Backend returned isOutdoor:", savedReminder.isOutdoor, typeof savedReminder.isOutdoor);
         
-        // Add to local state with proper id conversion
-        const reminderToAdd = { ...savedReminder, id: savedReminder._id };
-        console.log("✅ Adding to local state:", JSON.stringify(reminderToAdd, null, 2));
-        setReminders((prev) => [...prev, reminderToAdd]);
-        
         // Reset form
-        setModalVisible(false);
-        setNewReminderTitle("");
-        setSelectedCategory(null);
-        setIsOutdoor(false);
+        resetModal();
         
-        // Reload reminders to double-check
+        // Reload reminders to get fresh data with weather
         console.log("🔄 Reloading reminders to verify...");
         setTimeout(() => {
           loadReminders();
-        }, 1000);
+        }, 500);
       } else {
         const errorText = await response.text();
         console.error("❌ Failed to create reminder:", response.status, errorText);
@@ -382,8 +404,7 @@ export default function RemindersScreen(): React.ReactElement {
         setReminders((prev) => prev.filter((r) => r.id !== id));
         
         // Close delete modal
-        setDeleteModalVisible(false);
-        setSelectedReminder(null);
+        resetDeleteModal();
         
         Alert.alert("Success", "Reminder deleted successfully");
       } else {
@@ -406,7 +427,7 @@ export default function RemindersScreen(): React.ReactElement {
     reminderId: string,
     location: { name: string; latitude: number; longitude: number; proximity: number }
   ): Promise<void> => {
-    Keyboard.dismiss()
+    Keyboard.dismiss();
     
     // Optimistic update
     setReminders((prev) =>
@@ -499,6 +520,13 @@ export default function RemindersScreen(): React.ReactElement {
     );
   };
 
+  // Fixed: Better date button handler
+  const handleDateButtonPress = (reminderId: string, e: any) => {
+    e.stopPropagation();
+    setSelectedReminderForDate(reminderId);
+    setCalendarVisible(true);
+  };
+
   // Updated renderReminder function with better debugging
   const renderReminder = (item: ReminderWithWeather) => {
     console.log("🎨 Rendering reminder:", {
@@ -530,6 +558,13 @@ export default function RemindersScreen(): React.ReactElement {
             <Text style={styles.locationText}>📍 {item.location.name}</Text>
           )}
 
+          {/* Show date if available */}
+          {dateForReminder[item.id] && (
+            <Text style={styles.locationText}>
+              📅 {dateForReminder[item.id].toLocaleDateString()}
+            </Text>
+          )}
+
           {/* Weather info only shown if weather data or alert exists */}
           {(item.weather || item.weatherAlert) &&
             renderWeatherInfo(item.weather, item.weatherAlert)}
@@ -549,22 +584,41 @@ export default function RemindersScreen(): React.ReactElement {
             trackColor={{ false: "#767577", true: "#81b0ff" }}
             thumbColor={item.isActive ? "#f5dd4b" : "#f4f3f4"}
           />
-          <TouchableOpacity
-            style={styles.assignLocationButton}
-            onPress={(e) => {
-              e.stopPropagation();
-              setReminderToAssign(item.id);
-              setMapVisible(true);
-            }}
-          >
-            <Text style={styles.assignLocationText}>
-              {item.location ? "📍" : "📍+"}
-            </Text>
-          </TouchableOpacity>
+          <View style={styles.actionButtonsContainer}>
+            <TouchableOpacity
+              style={styles.assignLocationButton}
+              onPress={(e) => {
+                e.stopPropagation();
+                setReminderToAssign(item.id);
+                setMapVisible(true);
+              }}
+            >
+              <Text style={styles.assignLocationText}>
+                {item.location ? "📍" : "📍+"}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.assignDateButton}
+              onPress={(e) => handleDateButtonPress(item.id, e)}
+            >
+              <Text style={styles.assignDateText}>📅</Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </TouchableOpacity>
     );
   };
+
+  // Loading state
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#007AFF" />
+        <Text style={styles.loadingText}>Loading reminders...</Text>
+      </View>
+    );
+  }
 
   return (
     <ImageBackground
@@ -666,9 +720,11 @@ export default function RemindersScreen(): React.ReactElement {
             />
             
             {/* Debug info to see current state */}
-            <Text style={{ fontSize: 12, color: 'blue', marginBottom: 10 }}>
-              Debug: isOutdoor = {isOutdoor ? 'true' : 'false'}
-            </Text>
+            {__DEV__ && (
+              <Text style={{ fontSize: 12, color: 'blue', marginBottom: 10 }}>
+                Debug: isOutdoor = {isOutdoor ? 'true' : 'false'}
+              </Text>
+            )}
             
             <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10 }}>
               <Text style={{ marginRight: 10 }}>Is Outdoor</Text>
@@ -763,6 +819,43 @@ export default function RemindersScreen(): React.ReactElement {
         >
           <Text style={styles.buttonText}>Close Map</Text>
         </TouchableOpacity>
+      </Modal>
+
+      {/* Fixed Calendar Modal */}
+      <Modal
+        visible={isCalendarVisible}
+        animationType="slide"
+        onRequestClose={() => setCalendarVisible(false)}
+      >
+        <View style={styles.calendarModalContainer}>
+          <Text style={styles.modalHeader}>Select Date</Text>
+          <DateTimePicker
+            value={selectedReminderForDate ? (dateForReminder[selectedReminderForDate] || new Date()) : new Date()}
+            mode="date"
+            display="default"
+            minimumDate={new Date()}
+            onChange={(event, selectedDate) => {
+              if (Platform.OS !== 'ios') {
+                setCalendarVisible(false);
+              }
+              if (selectedDate && selectedReminderForDate) {
+                setDateForReminder(prev => ({
+                  ...prev,
+                  [selectedReminderForDate]: selectedDate
+                }));
+              }
+            }}
+            style={{ flex: 1 }}
+          />
+
+          <TouchableOpacity
+            style={styles.closeCalendarButton}
+            onPress={() => setCalendarVisible(false)}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.buttonText}>Close Calendar</Text>
+          </TouchableOpacity>
+        </View>
       </Modal>
     </ImageBackground>
   );
@@ -908,6 +1001,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: 10,
   },
+  actionButtonsContainer: {
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 8,
+  },
   title: {
     fontSize: 16,
     fontWeight: "500",
@@ -983,6 +1081,8 @@ const styles = StyleSheet.create({
     padding: 8,
     borderRadius: 8,
     backgroundColor: "rgba(0, 122, 255, 0.1)",
+    minWidth: 40,
+    alignItems: "center",
   },
   assignLocationText: {
     fontSize: 16,
@@ -1075,4 +1175,39 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
+  assignDateButton: {
+    backgroundColor: '#4A90E2',      
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 40,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.2,
+    shadowRadius: 2,
+    elevation: 3,         
+  },
+  assignDateText: {
+    color: '#fff',     
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  calendarModalContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    padding: 20,
+  },
+  closeCalendarButton: {
+    backgroundColor: "#007AFF",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 20,
+    alignItems: "center",
+  },
 });
+          
