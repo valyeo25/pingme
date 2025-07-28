@@ -1,48 +1,84 @@
 {
   "project_info": {
-    "project_number": "140525205614",
-    "project_id": "pingme-58b20",
-    "storage_bucket": "pingme-58b20.appspot.com"
+    "project_number": "572824445032",
+    "project_id": "location-reminder-app-a7906",
+    "storage_bucket": "location-reminder-app-a7906.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:140525205614:android:ad565e29a729a5ee03ce7f",
+        "mobilesdk_app_id": "1:572824445032:android:1fb3f02e3ae6a13b565bdd",
         "android_client_info": {
-          "package_name": "com.orbital.pingme"
+          "package_name": "com.galaxies.firebase"
         }
       },
       "oauth_client": [
         {
-          "client_id": "140525205614-vr4pqbfhp7sqp858r1k3k09vgs7cplk0.apps.googleusercontent.com",
-          "client_type": 1,
-          "android_info": {
-            "package_name": "com.orbital.pingme",
-            "certificate_hash": "5e8f16062ea3cd2c4a0d547876baa6f38cabf625"
-          }
-        },
-        {
-          "client_id": "140525205614-ljm5dh0tkaapa3aous69ghr7s5kvks17.apps.googleusercontent.com",
+          "client_id": "572824445032-o1aj7dn44e9pneh9henbiciufed6sl0n.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyBjLjwe9T4iTMDSQ-OJyEV73RkYDZ7BAAc"
+          "current_key": "AIzaSyDR8lPKew87TULVIGL1CGKIMjknBGjqiCo"
         }
       ],
       "services": {
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "140525205614-ljm5dh0tkaapa3aous69ghr7s5kvks17.apps.googleusercontent.com",
+              "client_id": "572824445032-o1aj7dn44e9pneh9henbiciufed6sl0n.apps.googleusercontent.com",
               "client_type": 3
             },
             {
-              "client_id": "140525205614-anibcmf0l2uko7kcdglmekuti2mlljq7.apps.googleusercontent.com",
+              "client_id": "572824445032-8c8m4c34nefmag41us4l9dng2vo1vrfh.apps.googleusercontent.com",
               "client_type": 2,
               "ios_info": {
-                "bundle_id": "com.orbital.pingme"
+                "bundle_id": "com.galaxies.firebase"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:572824445032:android:b9f2ab5fd3ca7a01565bdd",
+        "android_client_info": {
+          "package_name": "com.orbital.pingme"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "572824445032-obbkun9f5g44ilak13keebjm1bvqglrv.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.orbital.pingme",
+            "certificate_hash": "5d040fb81f2b8871ee01e7f41f8ef8eb95e3db4f"
+          }
+        },
+        {
+          "client_id": "572824445032-o1aj7dn44e9pneh9henbiciufed6sl0n.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDR8lPKew87TULVIGL1CGKIMjknBGjqiCo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "572824445032-o1aj7dn44e9pneh9henbiciufed6sl0n.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "572824445032-8c8m4c34nefmag41us4l9dng2vo1vrfh.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.galaxies.firebase"
               }
             }
           ]

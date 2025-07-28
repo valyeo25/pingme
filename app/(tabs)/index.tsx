@@ -12,13 +12,17 @@ import {
   TouchableOpacity,
   View,
   ActivityIndicator,
-  Platform
 } from "react-native";
 import { NotificationService } from "../../services/notificationService";
 import MapScreen from "./map";
 import { Keyboard } from 'react-native';
-import weatherService from "../../services/weatherServices";
-import DateTimePicker from '@react-native-community/datetimepicker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+type Category = {
+  id: string;
+  name: string;
+  color: string;
+};
 
 type Reminder = {
   id: string;
@@ -32,7 +36,10 @@ type Reminder = {
     longitude: number;
     proximity?: number;
   };
-  date?: Date;
+  aiGenerated?: boolean;
+  reason?: string;
+  priority?: string;
+  relatedEvent?: string;
 };
 
 type WeatherData = {
@@ -49,7 +56,6 @@ type ReminderWithWeather = Reminder & {
   location?: Location;
   weather?: WeatherData;
   weatherAlert?: string | null;
-  date?: Date;
 };
 
 type Location = {
@@ -59,22 +65,27 @@ type Location = {
   proximity?: number;
 };
 
-const categoryColors: Record<string, string> = {
-  Travel: "#d2e7ed",
-  Events: "#fce1f4",
-  Work: "#d4efc2",
-};
+// Default categories
+const DEFAULT_CATEGORIES: Category[] = [
+  { id: '1', name: 'Travel', color: '#45B7D1' },
+  { id: '2', name: 'Personal', color: '#FF6B6B' },
+  { id: '3', name: 'Work', color: '#4ECDC4' }
+  ,
+];
 
-const categories: string[] = ["Travel", "Events", "Work"];
-
-function getColorForCategory(category: string): string {
-  return categoryColors[category] || "#f0f0f0";
-}
+const CATEGORY_COLOR_OPTIONS = [
+  '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7', 
+  '#DDA0DD', '#98D8C8', '#F7DC6F', '#FF9999', '#66B2FF',
+  '#99FF99', '#FFB366', '#FF66FF', '#66FFB2', '#B366FF',
+  '#FFD700', '#87CEEB', '#20B2AA', '#F0E68C', '#FFB6C1'
+];
 
 const API_ENDPOINTS = {
-  REMINDERS: "http://192.168.219.161:5002/api/reminders", 
-  REMINDER_BY_ID: (id: string) => `http://192.168.219.161:5002/api/reminders/${id}`,
-  WEATHER_REMINDERS_BATCH: "http://192.168.219.161:5002/api/weather/reminders-batch",
+  REMINDERS: "http://10.0.2.2:5002/api/reminders", 
+  REMINDER_BY_ID: (id: string) => `http://10.0.2.2:5002/api/reminders/${id}`,
+  WEATHER_REMINDERS_BATCH: "http://10.0.2.2:5002/api/weather/reminders-batch",
+  SYNC_AI_REMINDERS: "http://10.0.2.2:5002/api/reminders/sync-ai",
+  AI_STATS: "http://10.0.2.2:5002/api/reminders/stats/ai",
 };
 
 export default function RemindersScreen(): React.ReactElement {
@@ -82,6 +93,7 @@ export default function RemindersScreen(): React.ReactElement {
 
   // State management
   const [reminders, setReminders] = useState<ReminderWithWeather[]>([]);
+  const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
   const [isLoading, setIsLoading] = useState(true);
   const [isModalVisible, setModalVisible] = useState(false);
   const [newReminderTitle, setNewReminderTitle] = useState("");
@@ -90,11 +102,11 @@ export default function RemindersScreen(): React.ReactElement {
   const [isMapVisible, setMapVisible] = useState(false);
   const [reminderToAssign, setReminderToAssign] = useState<string | null>(null);
   
-  // Fixed: Added missing state variables
-  const [isCalendarVisible, setCalendarVisible] = useState(false);
-  const [showPicker, setShowPicker] = useState(false);
-  const [dateForReminder, setDateForReminder] = useState<Record<string, Date>>({});
-  const [selectedReminderForDate, setSelectedReminderForDate] = useState<string | null>(null);
+  // Category management state
+  const [isCategoryModalVisible, setCategoryModalVisible] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [selectedCategoryColor, setSelectedCategoryColor] = useState(CATEGORY_COLOR_OPTIONS[0]);
+  const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   
   // Delete modal state
   const [isDeleteModalVisible, setDeleteModalVisible] = useState(false);
@@ -104,21 +116,222 @@ export default function RemindersScreen(): React.ReactElement {
   const [isLocationTrackingEnabled, setLocationTrackingEnabled] = useState(false);
   const [isTrackingLoading, setTrackingLoading] = useState(false);
 
-  // Load reminders and check tracking status on component mount
+  // AI Sync state
+  const [aiRemindersCount, setAIRemindersCount] = useState<number>(0);
+  const [isSyncing, setIsSyncing] = useState(false);
+
+  // Load data on component mount
   useEffect(() => {
+    loadCategories();
     loadReminders();
     checkTrackingStatus();
+    checkForAIRemindersToSync();
   }, []);
 
-  // Fixed: Proper onChange handler for date picker
-  const onChange = (event: any, selectedDate?: Date) => {
-    setShowPicker(Platform.OS === 'ios'); // keep open on iOS, close on Android
-    if (selectedDate && selectedReminderForDate) {
-      setDateForReminder(prev => ({
-        ...prev,
-        [selectedReminderForDate]: selectedDate
-      }));
+  const checkForAIRemindersToSync = async (): Promise<number> => {
+    try {
+      const storedAIReminders = await AsyncStorage.getItem('suggested_reminders');
+      if (storedAIReminders) {
+        const aiReminders = JSON.parse(storedAIReminders);
+        setAIRemindersCount(aiReminders.length);
+        return aiReminders.length;
+      }
+    } catch (error) {
+      console.error('Error checking AI reminders:', error);
     }
+    setAIRemindersCount(0);
+    return 0;
+  };
+
+  const loadAIReminders = async (): Promise<Reminder[]> => {
+    try {
+      const storedAIReminders = await AsyncStorage.getItem('suggested_reminders');
+      if (storedAIReminders) {
+        const aiReminders = JSON.parse(storedAIReminders);
+        return aiReminders.map((reminder: any) => ({
+          id: reminder.id,
+          title: reminder.title,
+          category: reminder.category,
+          isActive: reminder.isActive ?? true,
+          isOutdoor: reminder.isOutdoor ?? false,
+          aiGenerated: true,
+          reason: reminder.reason,
+          priority: reminder.priority,
+          relatedEvent: reminder.relatedEvent,
+        }));
+      }
+    } catch (error) {
+      console.error('Error loading AI reminders:', error);
+    }
+    return [];
+  };
+
+  const syncAIRemindersToBackend = async (): Promise<void> => {
+    if (isSyncing) return;
+
+    try {
+      setIsSyncing(true);
+      console.log("🔄 Starting AI reminders sync...");
+      
+      const storedAIReminders = await AsyncStorage.getItem('suggested_reminders');
+      if (!storedAIReminders) {
+        Alert.alert("No AI Reminders", "No AI reminders found to sync.");
+        return;
+      }
+
+      const aiReminders = JSON.parse(storedAIReminders);
+      if (aiReminders.length === 0) {
+        Alert.alert("No AI Reminders", "No AI reminders found to sync.");
+        return;
+      }
+
+      const response = await fetch(API_ENDPOINTS.SYNC_AI_REMINDERS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ aiReminders }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        await AsyncStorage.removeItem('suggested_reminders');
+        setAIRemindersCount(0);
+        await loadReminders();
+        
+        Alert.alert(
+          "Sync Complete! 🎉", 
+          `${result.synced} AI reminders synced!\nSkipped: ${result.skipped}\nErrors: ${result.errors}`
+        );
+      } else {
+        const errorData = await response.json();
+        throw new Error(errorData.message || `Sync failed: ${response.status}`);
+      }
+    } catch (error: any) {
+      console.error("❌ Error syncing AI reminders:", error);
+      Alert.alert("Sync Error", `Failed to sync: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Category management functions
+  const loadCategories = async () => {
+    try {
+      const storedCategories = await AsyncStorage.getItem('reminder_categories');
+      if (storedCategories) {
+        setCategories(JSON.parse(storedCategories));
+      }
+    } catch (error) {
+      console.error('Error loading categories:', error);
+    }
+  };
+
+  const saveCategories = async (newCategories: Category[]) => {
+    try {
+      await AsyncStorage.setItem('reminder_categories', JSON.stringify(newCategories));
+      setCategories(newCategories);
+    } catch (error) {
+      console.error('Error saving categories:', error);
+      Alert.alert('Error', 'Failed to save categories');
+    }
+  };
+
+  const openCategoryModal = (category?: Category) => {
+    if (category) {
+      setEditingCategory(category);
+      setNewCategoryName(category.name);
+      setSelectedCategoryColor(category.color);
+    } else {
+      setEditingCategory(null);
+      setNewCategoryName("");
+      setSelectedCategoryColor(CATEGORY_COLOR_OPTIONS[0]);
+    }
+    setCategoryModalVisible(true);
+  };
+
+  const closeCategoryModal = () => {
+    setCategoryModalVisible(false);
+    setEditingCategory(null);
+    setNewCategoryName("");
+    setSelectedCategoryColor(CATEGORY_COLOR_OPTIONS[0]);
+  };
+
+  const addOrUpdateCategory = async () => {
+    if (!newCategoryName.trim()) {
+      Alert.alert("Error", "Please enter a category name");
+      return;
+    }
+
+    // Check for duplicate names (except when editing)
+    const isDuplicate = categories.some((cat) => 
+      cat.name.toLowerCase() === newCategoryName.trim().toLowerCase() && 
+      cat.id !== editingCategory?.id
+    );
+
+    if (isDuplicate) {
+      Alert.alert("Error", "A category with this name already exists");
+      return;
+    }
+
+    let updatedCategories: Category[];
+
+    if (editingCategory) {
+      // Update existing category
+      updatedCategories = categories.map((cat) =>
+        cat.id === editingCategory.id
+          ? { ...cat, name: newCategoryName.trim(), color: selectedCategoryColor }
+          : cat
+      );
+    } else {
+      // Add new category
+      const newCategory: Category = {
+        id: Date.now().toString(),
+        name: newCategoryName.trim(),
+        color: selectedCategoryColor,
+      };
+      updatedCategories = [...categories, newCategory];
+    }
+
+    await saveCategories(updatedCategories);
+    closeCategoryModal();
+    Alert.alert("Success", editingCategory ? "Category updated!" : "Category added!");
+  };
+
+  const deleteCategory = (categoryId: string) => {
+    const categoryToDelete = categories.find(cat => cat.id === categoryId);
+    if (!categoryToDelete) return;
+
+    // Check if category is being used by any reminders
+    const isUsed = reminders.some(reminder => reminder.category === categoryToDelete.name);
+    
+    if (isUsed) {
+      Alert.alert(
+        "Cannot Delete",
+        "This category is being used by one or more reminders. Please reassign or delete those reminders first."
+      );
+      return;
+    }
+
+    Alert.alert(
+      "Delete Category",
+      `Are you sure you want to delete "${categoryToDelete.name}"?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: async () => {
+            const updatedCategories = categories.filter(cat => cat.id !== categoryId);
+            await saveCategories(updatedCategories);
+            Alert.alert("Success", "Category deleted!");
+          },
+        },
+      ]
+    );
+  };
+
+  const getColorForCategory = (categoryName: string): string => {
+    const category = categories.find(cat => cat.name === categoryName);
+    return category ? category.color : "#f0f0f0";
   };
 
   // Check tracking status
@@ -191,98 +404,97 @@ export default function RemindersScreen(): React.ReactElement {
   const loadReminders = async (): Promise<void> => {
     setIsLoading(true);
     try {
-      console.log("🔄 Starting to load reminders...");
-      
-      // Step 1: Fetch reminders
-      console.log("📡 Fetching from:", API_ENDPOINTS.REMINDERS);
+      // Load server reminders
       const response = await fetch(API_ENDPOINTS.REMINDERS);
-      console.log("📡 Reminders response status:", response.status);
+      let serverReminders: Reminder[] = [];
       
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error("❌ Reminders fetch failed:", errorText);
-        throw new Error(`Failed to fetch reminders: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log("📝 Raw reminders data:", JSON.stringify(data, null, 2));
-      console.log("📝 Number of reminders fetched:", data.length);
-
-      // Step 2: Format reminders
-      console.log("🔧 Starting to format reminders...");
-      const formattedReminders: Reminder[] = data.map((r: any, index: number) => {
-        console.log(`🔧 Processing reminder ${index + 1}:`, r);
-        console.log(`🔧 Raw isOutdoor value:`, r.isOutdoor, typeof r.isOutdoor);
-        
-        const formatted = {
+      if (response.ok) {
+        const data = await response.json();
+        serverReminders = data.map((r: any) => ({
           id: r._id,
           title: r.title,
           category: r.category,
           isActive: r.isActive ?? true,
-          isOutdoor: Boolean(r.isOutdoor), // Ensure boolean conversion
+          isOutdoor: Boolean(r.isOutdoor),
           location: r.location,
-          date: r.date ? new Date(r.date) : undefined,
-        };
-        console.log(`🔧 Formatted reminder ${index + 1}:`, JSON.stringify(formatted, null, 2));
-        return formatted;
-      });
+          aiGenerated: r.aiGenerated ?? false,
+          reason: r.reason,
+          priority: r.priority,
+          relatedEvent: r.relatedEvent,
+        }));
+      }
 
-      console.log("📋 All formatted reminders:", JSON.stringify(formattedReminders, null, 2));
-
-      // Step 3: Prepare weather request
-      const weatherRequestBody = { reminders: formattedReminders };
-      console.log("🌤️ Weather request body:", JSON.stringify(weatherRequestBody, null, 2));
-
-      // Step 4: Fetch weather for reminders batch
-      console.log("🌤️ Fetching weather data from:", API_ENDPOINTS.WEATHER_REMINDERS_BATCH);
+      // Load local AI reminders
+      const localAIReminders = await loadAIReminders();
+      setAIRemindersCount(localAIReminders.length);
       
-      const weatherResponse = await fetch(API_ENDPOINTS.WEATHER_REMINDERS_BATCH, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(weatherRequestBody),
-      });
+      // Combine both types
+      const allReminders = [...serverReminders, ...localAIReminders];
 
-      console.log("🌤️ Weather response status:", weatherResponse.status);
+      // Filter outdoor reminders with locations for weather data
+      const outdoorRemindersWithLocation = allReminders.filter(
+        (reminder) => reminder.isOutdoor && 
+                      reminder.location && 
+                      reminder.location.latitude && 
+                      reminder.location.longitude &&
+                      reminder.location.name !== undefined
+      );
 
-      if (!weatherResponse.ok) {
-        const errorText = await weatherResponse.text();
-        console.error("❌ Weather API error:", errorText);
-        // Don't throw error, just use reminders without weather
-        console.warn("⚠️ Using reminders without weather data");
-        setReminders(formattedReminders);
-        return;
-      }
+      console.log(`🌤️ Found ${outdoorRemindersWithLocation.length} outdoor reminders with locations`);
 
-      const weatherData = await weatherResponse.json();
-      console.log("🌤️ Weather response data:", JSON.stringify(weatherData, null, 2));
+      let remindersWithWeather = allReminders;
 
-      // Step 5: Check if weather data has the expected structure
-      if (weatherData && weatherData.reminders) {
-        console.log("✅ Weather data structure is correct");
-        console.log("📊 Number of reminders with weather:", weatherData.reminders.length);
-        
-        // Log each reminder with weather
-        weatherData.reminders.forEach((reminder: any, index: number) => {
-          console.log(`🔍 Reminder ${index + 1}:`, {
-            id: reminder.id,
-            title: reminder.title,
-            hasWeather: !!reminder.weather,
-            hasWeatherAlert: !!reminder.weatherAlert,
-            weather: reminder.weather,
-            weatherAlert: reminder.weatherAlert
+      // Fetch weather data for outdoor reminders if any exist
+      if (outdoorRemindersWithLocation.length > 0) {
+        try {
+          console.log("🌦️ Fetching weather data...");
+          
+          const weatherResponse = await fetch(API_ENDPOINTS.WEATHER_REMINDERS_BATCH, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              reminders: outdoorRemindersWithLocation.map(r => ({
+                id: r.id,
+                title: r.title,
+                location: r.location,
+                isOutdoor: r.isOutdoor
+              }))
+            }),
           });
-        });
-        
-        setReminders(weatherData.reminders);
-      } else {
-        console.warn("⚠️ Unexpected weather data structure:", weatherData);
-        // Fallback: set reminders without weather
-        setReminders(formattedReminders);
+
+          if (weatherResponse.ok) {
+            const weatherData = await weatherResponse.json();
+            console.log("✅ Weather data received:", weatherData);
+            
+            // Map weather data back to reminders
+            remindersWithWeather = allReminders.map(reminder => {
+              if (reminder.isOutdoor && reminder.location) {
+                const weatherInfo = weatherData.reminders?.find((wr: any) => wr.id === reminder.id);
+                if (weatherInfo) {
+                  return {
+                    ...reminder,
+                    weather: weatherInfo.weather,
+                    weatherAlert: weatherInfo.weatherAlert
+                  };
+                }
+              }
+              return reminder;
+            });
+            
+            console.log(`🌈 Weather attached to ${weatherData.reminders?.length || 0} reminders`);
+          } else {
+            console.error("❌ Weather API failed:", weatherResponse.status, await weatherResponse.text());
+          }
+        } catch (weatherError) {
+          console.error("❌ Weather fetch error:", weatherError);
+        }
       }
 
-    } catch (error: any) {
-      console.error("❌ Error in loadReminders:", error);
-      Alert.alert("Error", error.message || "Failed to load reminders");
+      setReminders(remindersWithWeather);
+      
+    } catch (error) {
+      console.error("❌ Error loading reminders:", error);
+      Alert.alert("Error", "Failed to load reminders");
     } finally {
       setIsLoading(false);
     }
@@ -290,43 +502,28 @@ export default function RemindersScreen(): React.ReactElement {
 
   const toggleReminder = async (id: string): Promise<void> => {
     const reminder = reminders.find(r => r.id === id);
-    if (!reminder) {
-      console.error("❌ Reminder not found:", id);
-      return;
-    }
+    if (!reminder) return;
 
     const updatedReminder = { ...reminder, isActive: !reminder.isActive };
     
-    // Optimistic update
     setReminders((prev) =>
       prev.map((r) => (r.id === id ? updatedReminder : r))
     );
 
     try {
-      console.log("🔄 Updating reminder status:", id, !reminder.isActive);
       const response = await fetch(API_ENDPOINTS.REMINDER_BY_ID(id), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ isActive: !reminder.isActive }),
       });
 
-      if (response.ok) {
-        const result = await response.json();
-        console.log("✅ Reminder status updated:", result);
-      } else {
-        const errorText = await response.text();
-        console.error("❌ Failed to update reminder:", errorText);
-        
-        // Revert optimistic update
+      if (!response.ok) {
         setReminders((prev) =>
           prev.map((r) => (r.id === id ? reminder : r))
         );
         Alert.alert("Error", "Failed to update reminder status");
       }
     } catch (error) {
-      console.error("❌ Network error updating reminder:", error);
-      
-      // Revert optimistic update
       setReminders((prev) =>
         prev.map((r) => (r.id === id ? reminder : r))
       );
@@ -352,11 +549,6 @@ export default function RemindersScreen(): React.ReactElement {
       isActive: true,
     };
 
-    // Debug log to see what we're sending
-    console.log("🔄 Creating new reminder with isOutdoor:", isOutdoor);
-    console.log("🔄 Full reminder object:", JSON.stringify(newReminder, null, 2));
-    console.log("🔄 Sending to API endpoint:", API_ENDPOINTS.REMINDERS);
-
     try {
       const response = await fetch(API_ENDPOINTS.REMINDERS, {
         method: "POST",
@@ -364,56 +556,33 @@ export default function RemindersScreen(): React.ReactElement {
         body: JSON.stringify(newReminder),
       });
 
-      console.log("🔄 Response status:", response.status);
-
       if (response.ok) {
-        const savedReminder = await response.json();
-        console.log("✅ Reminder created by backend:", JSON.stringify(savedReminder, null, 2));
-        console.log("✅ Backend returned isOutdoor:", savedReminder.isOutdoor, typeof savedReminder.isOutdoor);
-        
-        // Reset form
         resetModal();
-        
-        // Reload reminders to get fresh data with weather
-        console.log("🔄 Reloading reminders to verify...");
         setTimeout(() => {
           loadReminders();
         }, 500);
       } else {
-        const errorText = await response.text();
-        console.error("❌ Failed to create reminder:", response.status, errorText);
         Alert.alert("Error", "Failed to save reminder");
       }
     } catch (error) {
-      console.error("❌ Network error creating reminder:", error);
       Alert.alert("Error", "Failed to connect to server");
     }
   };
 
   const deleteReminder = async (id: string): Promise<void> => {
     try {
-      console.log("🔄 Deleting reminder:", id);
       const response = await fetch(API_ENDPOINTS.REMINDER_BY_ID(id), {
         method: "DELETE",
       });
 
       if (response.ok) {
-        console.log("✅ Reminder deleted successfully");
-        
-        // Remove from local state
         setReminders((prev) => prev.filter((r) => r.id !== id));
-        
-        // Close delete modal
         resetDeleteModal();
-        
         Alert.alert("Success", "Reminder deleted successfully");
       } else {
-        const errorText = await response.text();
-        console.error("❌ Failed to delete reminder:", errorText);
         Alert.alert("Error", "Failed to delete reminder");
       }
     } catch (error) {
-      console.error("❌ Network error deleting reminder:", error);
       Alert.alert("Error", "Failed to connect to server");
     }
   };
@@ -429,13 +598,11 @@ export default function RemindersScreen(): React.ReactElement {
   ): Promise<void> => {
     Keyboard.dismiss();
     
-    // Optimistic update
     setReminders((prev) =>
       prev.map((r) => (r.id === reminderId ? { ...r, location } : r))
     );
 
     try {
-      console.log("🔄 Updating location for reminder:", reminderId, location);
       const response = await fetch(API_ENDPOINTS.REMINDER_BY_ID(reminderId), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -443,28 +610,16 @@ export default function RemindersScreen(): React.ReactElement {
       });
 
       if (response.ok) {
-        const result = await response.json();
-        console.log("✅ Location updated in backend:", result);
-        
-        // After location is updated, refresh weather data
         setTimeout(() => {
-          loadReminders(); // This will refetch all reminders with weather
+          loadReminders();
         }, 500);
-        
       } else {
-        const errorText = await response.text();
-        console.error("❌ Failed to update location:", errorText);
-        
-        // Revert optimistic update
         setReminders((prev) =>
           prev.map((r) => (r.id === reminderId ? { ...r, location: undefined } : r))
         );
         Alert.alert("Error", "Failed to update location");
       }
     } catch (error) {
-      console.error("❌ Network error updating location:", error);
-      
-      // Revert optimistic update
       setReminders((prev) =>
         prev.map((r) => (r.id === reminderId ? { ...r, location: undefined } : r))
       );
@@ -477,12 +632,8 @@ export default function RemindersScreen(): React.ReactElement {
     }, 100);
   };
 
-  // Enhanced renderWeatherInfo function with better debugging
   const renderWeatherInfo = (weather: WeatherData | undefined, weatherAlert: string | null | undefined) => {
-    console.log("🎨 Rendering weather info:", { weather, weatherAlert });
-    
     if (!weather && !weatherAlert) {
-      console.log("ℹ️ No weather or alert data to display");
       return null;
     }
 
@@ -500,11 +651,6 @@ export default function RemindersScreen(): React.ReactElement {
                   💡 {weather.recommendation}
                 </Text>
               )}
-              {weather.area && (
-                <Text style={styles.weatherArea}>
-                  📍 {weather.area}
-                </Text>
-              )}
             </View>
           </View>
         )}
@@ -520,71 +666,48 @@ export default function RemindersScreen(): React.ReactElement {
     );
   };
 
-  // Fixed: Better date button handler
-  const handleDateButtonPress = (reminderId: string, e: any) => {
-    e.stopPropagation();
-    setSelectedReminderForDate(reminderId);
-    setCalendarVisible(true);
-  };
-
-  // Updated renderReminder function with better debugging
   const renderReminder = (item: ReminderWithWeather) => {
-    console.log("🎨 Rendering reminder:", {
-      id: item.id,
-      title: item.title,
-      hasLocation: !!item.location,
-      hasWeather: !!item.weather,
-      hasWeatherAlert: !!item.weatherAlert,
-      isOutdoor: item.isOutdoor
-    });
-
     return (
       <TouchableOpacity
-        style={styles.reminderBox}
+        style={styles.verticalContent}
         key={item.id}
         onPress={() => handleReminderPress(item)}
         activeOpacity={0.7}
       >
-        <View style={styles.reminderContent}>
-          <Text style={styles.title}>{item.title}</Text>
+        <View style={styles.reminderBox}>
+          <View style={styles.reminderContent}>
+            <View style={styles.titleRow}>
+              <Text style={styles.title}>{item.title}</Text>
+              {item.aiGenerated && (
+                <View style={styles.aiGeneratedBadge}>
+                  <Text style={styles.aiGeneratedText}>🤖 AI</Text>
+                </View>
+              )}
+            </View>
 
-          {/* Show if it's an outdoor reminder */}
-          {item.isOutdoor && (
-            <Text style={styles.locationText}>🌳 Outdoor Activity</Text>
-          )}
+            {item.reason && (
+              <Text style={styles.aiReasonText}>💡 {item.reason}</Text>
+            )}
 
-          {/* Show location name if available */}
-          {item.location && (
-            <Text style={styles.locationText}>📍 {item.location.name}</Text>
-          )}
+            {item.relatedEvent && (
+              <Text style={styles.relatedEventText}>📅 Related: {item.relatedEvent}</Text>
+            )}
 
-          {/* Show date if available */}
-          {dateForReminder[item.id] && (
-            <Text style={styles.locationText}>
-              📅 {dateForReminder[item.id].toLocaleDateString()}
-            </Text>
-          )}
+            {item.location && (
+              <Text style={styles.locationText}>📍 {item.location.name}</Text>
+            )}
 
-          {/* Weather info only shown if weather data or alert exists */}
-          {(item.weather || item.weatherAlert) &&
-            renderWeatherInfo(item.weather, item.weatherAlert)}
-          
-          {/* Debug info - remove this in production */}
-          {__DEV__ && (
-            <Text style={{fontSize: 10, color: 'red'}}>
-              Debug: Weather={!!item.weather}, Alert={!!item.weatherAlert}, Outdoor={!!item.isOutdoor}
-            </Text>
-          )}
-        </View>
-
-        <View style={styles.reminderActions}>
-          <Switch
-            value={item.isActive}
-            onValueChange={() => toggleReminder(item.id)}
-            trackColor={{ false: "#767577", true: "#81b0ff" }}
-            thumbColor={item.isActive ? "#f5dd4b" : "#f4f3f4"}
-          />
-          <View style={styles.actionButtonsContainer}>
+            {item.isOutdoor && (
+              <Text style={styles.locationText}>🌳 Outdoor Activity</Text>
+            )}
+          </View>
+          <View style={styles.reminderActions}>
+            <Switch
+              value={item.isActive}
+              onValueChange={() => toggleReminder(item.id)}
+              trackColor={{ false: "#767577", true: "#81b0ff" }}
+              thumbColor={item.isActive ? "#f5dd4b" : "#f4f3f4"}
+            />
             <TouchableOpacity
               style={styles.assignLocationButton}
               onPress={(e) => {
@@ -597,15 +720,10 @@ export default function RemindersScreen(): React.ReactElement {
                 {item.location ? "📍" : "📍+"}
               </Text>
             </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.assignDateButton}
-              onPress={(e) => handleDateButtonPress(item.id, e)}
-            >
-              <Text style={styles.assignDateText}>📅</Text>
-            </TouchableOpacity>
           </View>
         </View>
+        {(item.weather || item.weatherAlert) &&
+          renderWeatherInfo(item.weather, item.weatherAlert)}
       </TouchableOpacity>
     );
   };
@@ -627,37 +745,29 @@ export default function RemindersScreen(): React.ReactElement {
       imageStyle={{ opacity: 0.2 }}
       resizeMode="cover"
     >
-      <Text style={styles.header}>Reminders</Text>
-
-      {/* Location Tracking Settings */}
-      <View style={styles.settingsContainer}>
-        <View style={styles.settingsRow}>
-          <View style={styles.settingsTextContainer}>
-            <Text style={styles.settingsTitle}>Location Notifications</Text>
-            <Text style={styles.settingsSubtitle}>
-              Get notified when near your reminders
-            </Text>
-          </View>
-          {isTrackingLoading ? (
-            <ActivityIndicator size="small" color="#007AFF" />
-          ) : (
-            <Switch
-              value={isLocationTrackingEnabled}
-              onValueChange={toggleLocationTracking}
-              trackColor={{ false: "#767577", true: "#81b0ff" }}
-              thumbColor={isLocationTrackingEnabled ? "#f5dd4b" : "#f4f3f4"}
-            />
+      <View style={styles.headerContainer}>
+        <Text style={styles.header}>Reminders</Text>
+        <View style={styles.headerActions}>
+          {aiRemindersCount > 0 && (
+            <TouchableOpacity 
+              style={[styles.syncButton, isSyncing && styles.syncButtonDisabled]}
+              onPress={syncAIRemindersToBackend}
+              disabled={isSyncing}
+            >
+              {isSyncing ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <Text style={styles.syncButtonText}>⬆️ Sync {aiRemindersCount}</Text>
+              )}
+            </TouchableOpacity>
           )}
+          <TouchableOpacity 
+            style={styles.manageCategoriesButton}
+            onPress={() => openCategoryModal()}
+          >
+            <Text style={styles.manageCategoriesText}>⚙️</Text>
+          </TouchableOpacity>
         </View>
-        
-        {/* Test button */}
-        <TouchableOpacity 
-          style={styles.testButton} 
-          onPress={testNotification}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.testButtonText}>Test Notification</Text>
-        </TouchableOpacity>
       </View>
 
       <ScrollView 
@@ -665,26 +775,35 @@ export default function RemindersScreen(): React.ReactElement {
         showsVerticalScrollIndicator={false}
       >
         {categories.map((category) => {
-          const categoryReminders = reminders.filter((r) => r.category === category);
+          const categoryReminders = reminders.filter((r) => r.category === category.name);
 
           return (
             <View
-              key={category}
-              style={[styles.categoryBox, { backgroundColor: getColorForCategory(category) }]}
+              key={category.id}
+              style={[styles.categoryBox, { backgroundColor: category.color }]}
             >
               <View style={styles.categorySection}>
                 <View style={styles.categoryHeader}>
-                  <Text style={styles.categoryTitle}>{category}</Text>
-                  <TouchableOpacity
-                    onPress={() => {
-                      setSelectedCategory(category);
-                      setModalVisible(true);
-                    }}
-                    style={styles.addButton}
-                    activeOpacity={0.7}
-                  >
-                    <Text style={styles.addButtonText}>+</Text>
-                  </TouchableOpacity>
+                  <Text style={styles.categoryTitle}>{category.name}</Text>
+                  <View style={styles.categoryActions}>
+                    <TouchableOpacity
+                      onPress={() => openCategoryModal(category)}
+                      style={styles.editCategoryButton}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.editCategoryText}>✏️</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      onPress={() => {
+                        setSelectedCategory(category.name);
+                        setModalVisible(true);
+                      }}
+                      style={styles.addButton}
+                      activeOpacity={0.7}
+                    >
+                      <Text style={styles.addButtonText}>+</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
 
                 {categoryReminders.length > 0 ? (
@@ -719,21 +838,11 @@ export default function RemindersScreen(): React.ReactElement {
               maxLength={100}
             />
             
-            {/* Debug info to see current state */}
-            {__DEV__ && (
-              <Text style={{ fontSize: 12, color: 'blue', marginBottom: 10 }}>
-                Debug: isOutdoor = {isOutdoor ? 'true' : 'false'}
-              </Text>
-            )}
-            
             <View style={{ flexDirection: 'row', alignItems: 'center', marginVertical: 10 }}>
               <Text style={{ marginRight: 10 }}>Is Outdoor</Text>
               <Switch
                 value={isOutdoor}
-                onValueChange={(value) => {
-                  console.log("🔄 Switch toggled to:", value);
-                  setIsOutdoor(value);
-                }}
+                onValueChange={setIsOutdoor}
                 trackColor={{ false: "#767577", true: "#81b0ff" }}
                 thumbColor={isOutdoor ? "#f5dd4b" : "#f4f3f4"}
               />
@@ -745,22 +854,94 @@ export default function RemindersScreen(): React.ReactElement {
             <View style={styles.buttonContainer}>
               <TouchableOpacity 
                 style={styles.button} 
-                onPress={() => {
-                  console.log("🔄 About to create reminder with isOutdoor:", isOutdoor);
-                  addReminder();
-                }}
+                onPress={addReminder}
                 activeOpacity={0.8}
               >
                 <Text style={styles.buttonText}>Add Reminder</Text>
               </TouchableOpacity>
               <TouchableOpacity 
-                style={[styles.button, styles.cancelButton]} 
+                style={[styles.button, styles.modalCancelButton]} 
                 onPress={resetModal}
                 activeOpacity={0.8}
               >
                 <Text style={styles.buttonText}>Cancel</Text>
               </TouchableOpacity>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Category Management Modal */}
+      <Modal
+        transparent={true}
+        animationType="slide"
+        visible={isCategoryModalVisible}
+        onRequestClose={closeCategoryModal}
+      >
+        <View style={styles.modalContainer}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalHeader}>
+              {editingCategory ? 'Edit Category' : 'Add New Category'}
+            </Text>
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Category name"
+              value={newCategoryName}
+              onChangeText={setNewCategoryName}
+              maxLength={50}
+            />
+            
+            <Text style={styles.colorPickerLabel}>Choose Color:</Text>
+            <ScrollView 
+              horizontal 
+              showsHorizontalScrollIndicator={false}
+              style={styles.colorPickerContainer}
+            >
+              {CATEGORY_COLOR_OPTIONS.map((color) => (
+                <TouchableOpacity
+                  key={color}
+                  style={[
+                    styles.colorOption,
+                    { backgroundColor: color },
+                    selectedCategoryColor === color && styles.selectedColorOption
+                  ]}
+                  onPress={() => setSelectedCategoryColor(color)}
+                />
+              ))}
+            </ScrollView>
+            
+            <View style={styles.buttonContainer}>
+              <TouchableOpacity 
+                style={styles.button} 
+                onPress={addOrUpdateCategory}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.buttonText}>
+                  {editingCategory ? 'Update' : 'Add'} Category
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.button, styles.modalCancelButton]} 
+                onPress={closeCategoryModal}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.buttonText}>Cancel</Text>
+              </TouchableOpacity>
+            </View>
+
+            {editingCategory && (
+              <TouchableOpacity 
+                style={[styles.button, styles.deleteButton, { marginTop: 10 }]} 
+                onPress={() => {
+                  closeCategoryModal();
+                  deleteCategory(editingCategory.id);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.buttonText}>Delete Category</Text>
+              </TouchableOpacity>
+            )}
           </View>
         </View>
       </Modal>
@@ -820,43 +1001,6 @@ export default function RemindersScreen(): React.ReactElement {
           <Text style={styles.buttonText}>Close Map</Text>
         </TouchableOpacity>
       </Modal>
-
-      {/* Fixed Calendar Modal */}
-      <Modal
-        visible={isCalendarVisible}
-        animationType="slide"
-        onRequestClose={() => setCalendarVisible(false)}
-      >
-        <View style={styles.calendarModalContainer}>
-          <Text style={styles.modalHeader}>Select Date</Text>
-          <DateTimePicker
-            value={selectedReminderForDate ? (dateForReminder[selectedReminderForDate] || new Date()) : new Date()}
-            mode="date"
-            display="default"
-            minimumDate={new Date()}
-            onChange={(event, selectedDate) => {
-              if (Platform.OS !== 'ios') {
-                setCalendarVisible(false);
-              }
-              if (selectedDate && selectedReminderForDate) {
-                setDateForReminder(prev => ({
-                  ...prev,
-                  [selectedReminderForDate]: selectedDate
-                }));
-              }
-            }}
-            style={{ flex: 1 }}
-          />
-
-          <TouchableOpacity
-            style={styles.closeCalendarButton}
-            onPress={() => setCalendarVisible(false)}
-            activeOpacity={0.8}
-          >
-            <Text style={styles.buttonText}>Close Calendar</Text>
-          </TouchableOpacity>
-        </View>
-      </Modal>
     </ImageBackground>
   );
 }
@@ -866,6 +1010,27 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingTop: 80,
     paddingHorizontal: 5,
+  },
+  headerContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 15,
+    marginBottom: 20,
+  },
+  header: {
+    fontSize: 24,
+    fontWeight: "bold",
+    textAlign: "center",
+    color: "#333",
+  },
+  manageCategoriesButton: {
+    padding: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.8)',
+    borderRadius: 20,
+  },
+  manageCategoriesText: {
+    fontSize: 18,
   },
   loadingContainer: {
     flex: 1,
@@ -878,14 +1043,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#666",
   },
-  header: {
-    fontSize: 24,
-    fontWeight: "bold",
-    marginBottom: 20,
-    textAlign: "center",
-    color: "#333",
-  },
-  // Settings container styles
   settingsContainer: {
     backgroundColor: "rgba(255, 255, 255, 0.9)",
     marginHorizontal: 20,
@@ -963,6 +1120,21 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: "bold",
     color: "#333",
+    flex: 1,
+  },
+  categoryActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  editCategoryButton: {
+    borderRadius: 15,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    backgroundColor: "rgba(255, 255, 255, 0.3)",
+  },
+  editCategoryText: {
+    fontSize: 16,
   },
   addButton: {
     borderRadius: 15,
@@ -976,25 +1148,14 @@ const styles = StyleSheet.create({
     fontWeight: "bold",
   },
   reminderBox: {
-    backgroundColor: "#f8f9fa",
-    padding: 15,
-    borderRadius: 12,
-    marginBottom: 10,
+    padding: 2,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    shadowColor: "#000",
-    shadowOffset: {
-      width: 0,
-      height: 1,
-    },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
-    elevation: 2,
   },
   reminderContent: {
     flex: 1,
-    marginRight: 10,
+
   },
   reminderActions: {
     flexDirection: "row",
@@ -1017,18 +1178,19 @@ const styles = StyleSheet.create({
     color: "#666",
     marginBottom: 4,
   },
-  // Weather-specific styles
   weatherContainer: {
-    marginTop: 8,
+    marginTop: 6,
     padding: 8,
     backgroundColor: "rgba(135, 206, 235, 0.1)",
     borderRadius: 8,
     borderLeftWidth: 3,
     borderLeftColor: "#87CEEB",
+    alignSelf: 'stretch',
+    width: '100%',
   },
   weatherRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: 'flex-start',
   },
   weatherIcon: {
     fontSize: 24,
@@ -1051,11 +1213,6 @@ const styles = StyleSheet.create({
     fontStyle: "italic",
     marginBottom: 2,
     lineHeight: 14,
-  },
-  weatherArea: {
-    fontSize: 11,
-    color: "#888",
-    lineHeight: 13,
   },
   weatherAlertContainer: {
     marginTop: 6,
@@ -1123,23 +1280,45 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     fontSize: 16,
   },
+  colorPickerLabel: {
+    fontSize: 16,
+    fontWeight: "500",
+    marginBottom: 10,
+    alignSelf: "flex-start",
+    color: "#333",
+  },
+  colorPickerContainer: {
+    marginBottom: 20,
+  },
+  colorOption: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginHorizontal: 5,
+    borderWidth: 2,
+    borderColor: "transparent",
+  },
+  selectedColorOption: {
+    borderColor: "#000",
+    borderWidth: 3,
+  },
   buttonContainer: {
     flexDirection: "row",
     gap: 10,
   },
   button: {
-    backgroundColor: "#007AFF",
+    backgroundColor: "#539ceaff",
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 8,
     minWidth: 100,
     alignItems: "center",
   },
-  cancelButton: {
-    backgroundColor: "#FF3B30",
+  modalCancelButton: {
+    backgroundColor: "grey",
   },
   deleteButton: {
-    backgroundColor: "#FF3B30",
+    backgroundColor: "#f6726bff",
   },
   buttonText: {
     color: "white",
@@ -1175,39 +1354,131 @@ const styles = StyleSheet.create({
     shadowRadius: 3.84,
     elevation: 5,
   },
-  assignDateButton: {
-    backgroundColor: '#4A90E2',      
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minWidth: 40,
+  reminderTitle: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#333',
+    textAlign: 'center',
+    paddingVertical: 15,
+    paddingHorizontal: 20,
+    backgroundColor: '#ffffff',
+    marginBottom: 10,
+  },
+  verticalContent: {
+    backgroundColor: '#ffffff',
+    padding: 15,
+    borderRadius: 12,
+    marginBottom: 10,
+    flexDirection: "column",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    shadowColor: "#000",
+    shadowOffset: {
+      width: 0,
+      height: 1,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2
+  },
+  calendarWrapper: {
+    backgroundColor: '#ffffff',
+    marginHorizontal: 10,
+    borderRadius: 10,
+    overflow: 'hidden',
     shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
+    elevation: 5,
+  },
+  headerActions: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 8,
+  },
+  syncButton: {
+    backgroundColor: '#34C759',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 15,
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.2,
     shadowRadius: 2,
-    elevation: 3,         
-  },
-  assignDateText: {
-    color: '#fff',     
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  calendarModalContainer: {
-    flex: 1,
-    justifyContent: 'center',
+    elevation: 2,
+    minWidth: 80,
     alignItems: 'center',
-    backgroundColor: '#fff',
-    padding: 20,
   },
-  closeCalendarButton: {
-    backgroundColor: "#007AFF",
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 20,
+  syncButtonDisabled: {
+    backgroundColor: '#A0A0A0',
+  },
+  syncButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  titleRow: {
+    flexDirection: "row",
     alignItems: "center",
+    marginBottom: 4,
+  },
+  aiGeneratedBadge: {
+    backgroundColor: "#9C27B0",
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 8,
+    marginLeft: 8,
+  },
+  aiGeneratedText: {
+    color: "#fff",
+    fontSize: 10,
+    fontWeight: "bold",
+  },
+  aiReasonText: {
+    fontSize: 12,
+    color: "#666",
+    fontStyle: "italic",
+    marginBottom: 4,
+  },
+  relatedEventText: {
+    fontSize: 12,
+    color: "#007AFF",
+    marginBottom: 4,
   },
 });
-          
+
+/*
+<View style={styles.settingsContainer}>
+        <View style={styles.settingsRow}>
+          <View style={styles.settingsTextContainer}>
+            <Text style={styles.settingsTitle}>Location Notifications</Text>
+            <Text style={styles.settingsSubtitle}>
+              Get notified when near your reminders
+            </Text>
+          </View>
+          {isTrackingLoading ? (
+            <ActivityIndicator size="small" color="#007AFF" />
+          ) : (
+            <Switch
+              value={isLocationTrackingEnabled}
+              onValueChange={toggleLocationTracking}
+              trackColor={{ false: "#767577", true: "#81b0ff" }}
+              thumbColor={isLocationTrackingEnabled ? "#f5dd4b" : "#f4f3f4"}
+            />
+          )}
+        </View>
+      
+        
+        <TouchableOpacity 
+          style={styles.testButton} 
+          onPress={testNotification}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.testButtonText}>Test Notification</Text>
+        </TouchableOpacity>
+      </View>
+*/

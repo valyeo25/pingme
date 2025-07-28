@@ -1,8 +1,7 @@
 // api.ts
 
-// Change port from 5002 to 5000 to match your server
-const BASE = "http://192.168.219.161:5002/api/reminders";
-const WEATHER_BASE = "http://192.168.219.161:5002/api/weather"
+const BASE = "http://10.0.2.2:5002/api/reminders";
+const WEATHER_BASE = "http://10.0.2.2:5002/api/weather"
 
 export const API_ENDPOINTS = {
   REMINDERS: BASE,

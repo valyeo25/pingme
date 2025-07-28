@@ -48,3 +48,4 @@ location-reminder-app.lnk
 tracked_files.txt
 
 *.log
+config.ts
